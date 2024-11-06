@@ -133,6 +133,7 @@ object RelationalFunctions {
       classOf[WrappedMatrixToTableFunction],
       classOf[WrappedMatrixToValueFunction],
       classOf[PCRelate],
+      classOf[SimpleGroupSum],
     ),
     typeHintFieldName = "name",
   )
