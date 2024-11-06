@@ -3093,6 +3093,34 @@ def skat(
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 
 
+@typecheck(
+    key_expr=expr_any,
+    x=expr_float64,
+)
+def simple_group_sum(key_expr, x) -> Table:
+    mt = matrix_table_source('simple_sum/x', x)
+    raise_unless_entry_indexed('simple_sum/x', x)
+
+    analyze('simple_sum/key_expr', key_expr, mt._row_indices)
+
+    if x in mt._fields_inverse:
+        x_field_name = mt._fields_inverse[x]
+        entry_expr = {}
+    else:
+        x_field_name = Env.get_uid()
+        entry_expr = {x_field_name: x}
+
+    key_field_name = '__key'
+
+    mt = mt._select_all(
+        row_exprs={key_field_name: key_expr},
+        entry_exprs=entry_expr,
+    )
+
+    config = {'name': 'SimpleGroupSum', 'keyField': key_field_name, 'xField': x_field_name}
+    return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
+
+
 @typecheck(p_value=expr_numeric, approximate=bool)
 def lambda_gc(p_value, approximate=True):
     """
