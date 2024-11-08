@@ -39,7 +39,6 @@ case class SimpleGroupSum(
     // val backend = HailContext.backend
 
     val groupedObj = groupAndImputeMean(mv)
-    groupedObj.map(println)
     val rddObj = groupedObj.map{case (key, vals) =>
       val valArr = vals.toArray
       val n = valArr(0).length
