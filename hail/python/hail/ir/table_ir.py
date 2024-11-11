@@ -1039,6 +1039,11 @@ class MatrixToTableApply(TableIR):
                 i=hl.tstr, j=hl.tstr, ibd=ibd_info_type, ibs0=hl.tint64, ibs1=hl.tint64, ibs2=hl.tint64
             )
             return hl.ttable(hl.tstruct(), ibd_type, ['i', 'j'])
+        elif name == "SimpleGroupSum":
+            key_field = self.config['keyField']
+            key_type = child_typ.row_type[key_field]
+            my_type = hl.dtype(f'struct{{id:{key_type},my_sum:float64}}')
+            return hl.ttable(hl.tstruct(), my_type, ['id'])
         else:
             assert name == 'LocalLDPrune', name
             return hl.ttable(
