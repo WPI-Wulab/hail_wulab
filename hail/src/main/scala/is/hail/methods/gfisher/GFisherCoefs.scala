@@ -65,7 +65,7 @@ object GFisherCoefs {
   def getGFisherCoefs(
     df: BDV[Int],
     one_sided:Boolean = false,
-    n_integ: Int = 100,
+    n_integ: Int = 201,
   ): (BDV[Double], BDV[Double],BDV[Double],BDV[Double]) = {
 
     // val x = linspace(-8, 8, n_integ)
