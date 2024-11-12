@@ -16,7 +16,7 @@ object GFisherGM {
     * @param n_integ number of points to integrate along. passed to GFisherCoefs.getGFisherCoeffs
     * @param method method of numerical integration. passed to GFisherCoefs.getGFisherCoeffs
     */
-  def getGfisherGM(
+  def getGFisherGM(
     df: BDV[Int],
     w: BDV[Double],
     M: BDM[Double],
