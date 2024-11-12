@@ -42,9 +42,11 @@ case class SimpleGroupSum(
 
     val groupedObj = groupAndImputeMean(mv)
     val rddObj = groupedObj.map{case (key, vals) =>
-      val valArr = vals.toArray
-      val n = valArr(0).length
-      val X = new BDM(valArr.length, n, valArr.flatMap(_.toList))
+      val X = ArrayToMatrix.arrayToMatrix(vals.toArray)
+      // println("A")
+      // println("B")
+      // println(s"Processing group: $key on thread: ${Thread.currentThread().getName}")
+      Thread.sleep(5000)
       Row(key, sum(X))
     }
     val mtyp = typ(mv.typ)
@@ -57,7 +59,7 @@ case class SimpleGroupSum(
     *
     * @param mv hail MatrixTable
     */
-  def groupAndImputeMean(mv: MatrixValue): RDD[(Annotation, Iterable[Array[Double]])] = {
+  def groupAndImputeMean(mv: MatrixValue): RDD[(Annotation, Iterable[BDV[Double]])] = {
     val ncol = mv.nCols
     val completeColIdx = (0 until ncol).toArray
     val completeColIdxBc = HailContext.backend.broadcast(completeColIdx)
@@ -94,7 +96,7 @@ case class SimpleGroupSum(
             entryArrayIdx,
             fieldIdx,
           )
-          Some(key -> data)
+          Some(key -> BDV[Double](data))
         } else None
       }
     }.groupByKey()
