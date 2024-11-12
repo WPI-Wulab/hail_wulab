@@ -20,8 +20,8 @@ object GFisherGM {
     df: BDV[Int],
     w: BDV[Double],
     M: BDM[Double],
-    one_sided: Boolean,
-    n_integ: Int,
+    one_sided: Boolean = false,
+    n_integ: Int = 201,
   ): BDM[Double] = {
     val (c1, c2, c3, c4) = GFisherCoefs.getGFisherCoefs(df, one_sided, n_integ)
 
