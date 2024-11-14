@@ -2,7 +2,7 @@ package is.hail.methods.gfisher
 
 import is.hail.stats.eigSymD
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
-import breeze.numerics.{abs,sqrt}
+import breeze.numerics.{abs, sqrt, signum}
 
 // import net.sourceforge.jdistlib.{ChiSquare, Normal}
 
@@ -26,7 +26,7 @@ object GFisherLambda {
   ): BDV[Double] = {
     val n: Int = df.length
     val DM: BDM[Int] = min(tile(df, 1, n),  tile(df, 1, n).t)
-    val Mtilde: BDM[Double] = sqrt(abs(GM) /:/ convert(DM, Double) /:/ 2.0)
+    val Mtilde: BDM[Double] = sqrt(abs(GM) /:/ convert(DM, Double) /:/ 2.0) *:* signum(M)
     Mtilde(Mtilde >:> 1.0) := 0.999
 
     if (any(eigSymD.justEigenvalues(Mtilde) <:< 1e-10)) {
