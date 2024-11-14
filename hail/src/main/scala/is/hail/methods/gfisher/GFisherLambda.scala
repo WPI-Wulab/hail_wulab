@@ -32,21 +32,18 @@ object GFisherLambda {
     if (any(eigSymD.justEigenvalues(Mtilde) <:< 1e-10)) {
       Mtilde := nearPD(Mtilde)
     }
-    val WMChol: BDM[Double] = cholesky(M) * diag(sqrt(w))
-    var lam: BDV[Double] = eigSymD.justEigenvalues(WMChol.t * WMChol)
+
+    val MChol: BDM[Double] = cholesky(Mtilde).t // breeze cholesky returns the lower triangle. need to transpose it.
+    val WMChol: BDM[Double] = MChol * diag(sqrt(w))
+    var lam = reverse(eigSymD.justEigenvalues(WMChol.t * WMChol)) // eigSymD returns the eigen values in the reverse order of R
     if (max(df) > 1) {
       for (i <- 2 to max(df)) {
         val Ai = BDM.eye[Double](n)
         val aDiag = diag(Ai)
-
-        // this accomplishes `diag(Ai)(df <:< i) := 0.0`
-        aDiag(df <:< i) := 0.0
-
-        lam = BDV.vertcat(lam, eigSymD.justEigenvalues(WMChol * Ai * WMChol.t))
+        aDiag(df <:< i) := 0.0 // this also changes Ai
+        lam = BDV.vertcat(lam, reverse(eigSymD.justEigenvalues(WMChol * Ai * WMChol.t)))
       }
     }
-
-
     return lam(lam >:> 1e-10).toDenseVector
   }
 
