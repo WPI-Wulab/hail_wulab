@@ -21,7 +21,7 @@ import org.apache.spark.sql.Row
   * @param keyField
   * @param xField
   */
-case class SimpleGroupSum(
+case class MatrixTableEntryGroupedSum(
   keyField: String,
   xField: String
 ) extends MatrixToTableFunction {
