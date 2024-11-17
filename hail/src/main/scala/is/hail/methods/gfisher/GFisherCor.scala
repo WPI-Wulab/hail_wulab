@@ -46,24 +46,4 @@ object GFisherCor {
     cov2cor(COV)
     
     }
-
-  // Test function
-  def runTests(): Unit = {
-      println("Running inline tests...")
-        
-      val DD = BDM((1.0, 2.0), (3.0, 4.0))
-      val W = BDM((1.0, 1.0), (1.0, 1.0))
-      val M = BDM((1.0, 0.5), (0.5, 1.0))
-
-      val result = getGFisherCor(DD, W, M)
-      println("getGFisherCor result:")
-      println(result)
-        
-      println("All tests passed.")
-      }
-}
-
-// Run tests when the file is executed
-object Main extends App {
-  is.hail.methods.gfisher.GFisherCor.runTests()
 }
