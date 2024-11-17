@@ -3121,6 +3121,23 @@ def matrixtable_entry_grouped_sum(key_expr, x) -> Table:
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 
 
+def gfisher_thing(key, pval, df, w, corr, row_idx):
+    mt = matrix_table_source("gfisher_thing", key)
+    mt = mt._select_all(
+        row_exprs={'__key': key, '__pvalue': pval, '__weight': w, '__corr': corr, '__df': df, '__rowIdx': row_idx}
+    )
+    config = {
+        'name': 'GFisher',
+        'keyField': '__key',
+        'pField': '__pvalue',
+        'dfField': '__df',
+        'weightField': '__weight',
+        'corrField': '__corr',
+        'rowIDXField': '__rowIdx',
+    }
+    return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
+
+
 @typecheck(p_value=expr_numeric, approximate=bool)
 def lambda_gc(p_value, approximate=True):
     """
