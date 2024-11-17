@@ -3097,7 +3097,7 @@ def skat(
     key_expr=expr_any,
     x=expr_float64,
 )
-def simple_group_sum(key_expr, x) -> Table:
+def matrixtable_entry_grouped_sum(key_expr, x) -> Table:
     mt = matrix_table_source('simple_sum/x', x)
     raise_unless_entry_indexed('simple_sum/x', x)
 
@@ -3117,7 +3117,7 @@ def simple_group_sum(key_expr, x) -> Table:
         entry_exprs=entry_expr,
     )
 
-    config = {'name': 'SimpleGroupSum', 'keyField': key_field_name, 'xField': x_field_name}
+    config = {'name': 'MatrixTableEntryGroupedSum', 'keyField': key_field_name, 'xField': x_field_name}
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 
 
