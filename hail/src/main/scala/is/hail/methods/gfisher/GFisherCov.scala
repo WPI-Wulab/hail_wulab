@@ -1,7 +1,6 @@
 package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, diag, sum}
-import breeze.numerics.sqrt
 
 object GFisherCov {
 
