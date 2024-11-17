@@ -1,19 +1,8 @@
 package is.hail.methods.gfisher
 
-import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, diag}
-import breeze.numerics.sqrt
+import breeze.linalg.{DenseMatrix => BDM}
 
 object GFisherCor {
-
-  /**
-    * Helper function to calculate correlation matrix from covariance matrix
-    *
-    * @param covMatrix mxm covariance matrix 
-    */
-  def cov2cor(covMatrix: BDM[Double]): BDM[Double] = {
-    val diagValues: BDV[Double] = diag(covMatrix).map(math.sqrt)
-    covMatrix.mapPairs { case ((i, j), value) => value / (diagValues(i) * diagValues(j)) }
-    }
 
   /**
     * Compute correlation matrix
