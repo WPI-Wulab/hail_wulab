@@ -75,18 +75,6 @@ object GFisherCov {
             result
           }
         }
-
-    // val scaledD1 = D1.mapValues(_ / v1(0) * 2.0)
-    // val scaledD2 = D2.mapValues(_ / v2(0) * 2.0)
-
-    // val sqrtD1 = scaledD1.map(math.sqrt)
-    // val sqrtD2 = scaledD2.map(math.sqrt)
-
-    // val scaling1 = diag(sqrtD1.toDenseVector)
-    // val scaling2 = diag(sqrtD2.toDenseVector)
-
-    // val dot_prod = (scaling1 * scaling2.t)
-    // val GM_final = (dot_prod.flatten().toArray) * GM_cross.flatten()
     
     sum(GM_cross * (W1 * W2.t))
     
