@@ -10,6 +10,46 @@ import breeze.numerics.{abs, sqrt}
 
 package object gfisher {
 
+  /**
+    * Convert an array of vectors to a matrix. Column major order.
+    *
+    * @param a array containing
+    */
+  def tupleArrayToVectorTuple(
+    a: Array[(Int, Double, Int, Double, BDV[Double])]
+  ): (BDV[Int], BDV[Double], BDV[Int], BDV[Double], BDM[Double]) = {
+    require(a.nonEmpty)
+    val c0 = a(0)._5
+    require(c0.offset == 0 && c0.stride == 1)
+    val m: Int = a.length // number of rows that were put in this group
+    val n: Int = a(0)._5.size // number of elements in the correlation vector
+
+    val rowIdxArr = new Array[Int](m)
+    val pvalArr = new Array[Double](m)
+    val weightArr = new Array[Double](m)
+    val dfArr = new Array[Int](m)
+    // val corrArr = new Array[Double](m*n)
+
+    var i = 0
+    while (i < m) {
+      rowIdxArr(i) = a(i)._1
+      pvalArr(i) = a(i)._2
+      dfArr(i) = a(i)._3
+      weightArr(i) = a(i)._4
+      // System.arraycopy(a(i)._5.data, 0, corrArr, i*n, n)
+      i += 1
+    }
+    i = 0
+    val corrArr = new Array[Double](m*m)
+    while (i < m) {
+      for (j <- (0 until m)) {
+        corrArr(i*m+j) = a(i)._5(rowIdxArr(j))
+      }
+      i += 1
+    }
+    val corrMatrix = new BDM[Double](m, m, corrArr)
+    return (BDV(rowIdxArr), BDV(pvalArr), BDV(dfArr), BDV(weightArr), corrMatrix)
+  }
 
   /**
     * Subset the rows of a matrix. The order of the indices given does not matter.
