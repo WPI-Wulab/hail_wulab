@@ -33,6 +33,6 @@ object GFisherCor {
 
     // Return the correlation matrix by normalizing the covariance matrix
     cov2cor(COV)
-    
+
     }
 }

@@ -74,8 +74,8 @@ object GFisherCov {
             result
           }
         }
-    
+
     sum(GM_cross * (W1 * W2.t))
-    
+
     }
 }

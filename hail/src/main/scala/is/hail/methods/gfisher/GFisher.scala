@@ -42,9 +42,11 @@ case class GFisher(
     val newrdd = groupedRDD.map{case(key, vals) =>
       val valArr = vals.toArray
 
-      val (_, pval, df, w, corrMat) = tupleArrayToVectorTuple(valArr)
+      val (_, pvals, df, w, corrMat) = tupleArrayToVectorTuple(valArr)
+      val gFishStat = StatGFisher.statGFisher(pvals, df, w)
+      val gFishPVal = PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
       println(s"key $key\n$corrMat\n")
-      Row(key, 0.0, 3.0)
+      Row(key, gFishStat, gFishPVal)
     }
     TableValue(ctx, typ(mv.typ).rowType, typ(mv.typ).key, newrdd)
   }
