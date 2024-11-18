@@ -3122,6 +3122,36 @@ def matrixtable_entry_grouped_sum(key_expr, x) -> Table:
 
 
 def gfisher_thing(key, pval, df, w, corr, row_idx):
+    """Run GFisher Analysis on a dataset
+
+    Args:
+        key (_type_): _description_
+        pval (_type_): _description_
+        df (_type_): _description_
+        w (_type_): _description_
+        corr (_type_): _description_
+        row_idx (_type_): _description_
+
+    Returns:
+        _type_: _description_
+
+    Examples:
+    ```python
+    hl.reset_global_randomness()
+    mt = hl.balding_nichols_model(1, n_samples=20, n_variants=50)
+    mt = mt.annotate_rows(gene=mt.locus.position // 5)
+    mt = mt.annotate_entries(X=mt.GT.n_alt_alleles())
+    mt = mt.add_row_index()
+    mt = mt.annotate_rows(weight=1.0,
+                        df=hl.literal(list(range(1, 1 + mt.count_rows())))[hl.int32(mt.row_idx)])
+    mt = mt.annotate_cols(phenotype=hl.agg.sum(mt.GT.n_alt_alleles()) - 20 + hl.rand_norm(0, 1))
+    pval_ht = hl.linear_regression_rows(y=mt.phenotype, x=mt.X, covariates=[1.0])
+    row_cor = hl.row_correlation(mt.X)
+    rce = row_cor.to_table_row_major()
+    mt = mt.annotate_rows(row_cor=rce[mt.row_idx].entries, pval=pval_ht[mt.row_key].p_value)
+    hl.gfisher_thing(mt.gene, mt.pval, mt.df, mt.weight, mt.row_cor, mt.row_idx)
+    ```
+    """
     mt = matrix_table_source("gfisher_thing", key)
     mt = mt._select_all(
         row_exprs={'__key': key, '__pvalue': pval, '__weight': w, '__corr': corr, '__df': df, '__rowIdx': row_idx}
