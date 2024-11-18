@@ -21,9 +21,8 @@ object GFisherGM {
     w: BDV[Double],
     M: BDM[Double],
     one_sided: Boolean = false,
-    n_integ: Int = 201,
   ): BDM[Double] = {
-    val (c1, c2, c3, c4) = GFisherCoefs.getGFisherCoefs(df, one_sided, n_integ)
+    val (c1, c2, c3, c4) = GFisherCoefs.getGFisherCoefs(df, one_sided)
 
     val GM = if (one_sided) {
       M *:* (c1 * c1.t) + ((M ^:^ 2.0)/ 2.0) *:* (c2 * c2.t) + ((M ^:^ 3.0)/ 6.0) *:* (c3 * c3.t) + ((M ^:^ 4.0)/ 24.0) *:* (c4 * c4.t)

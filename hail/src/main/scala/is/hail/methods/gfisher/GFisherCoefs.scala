@@ -1,10 +1,9 @@
 package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
-import breeze.integrate.{simpson => simpsonBreeze}
-// import breeze.numerics.sqrt
 import net.sourceforge.jdistlib.{ChiSquare, Normal}
 
+import is.hail.GaussKronrod
 
 
 object GFisherCoefs {
@@ -65,28 +64,24 @@ object GFisherCoefs {
   def getGFisherCoefs(
     df: BDV[Int],
     one_sided:Boolean = false,
-    n_integ: Int = 201,
   ): (BDV[Double], BDV[Double],BDV[Double],BDV[Double]) = {
-
     // val x = linspace(-8, 8, n_integ)
     val coeff1 = BDV.zeros[Double](df.length)
     val coeff2 = BDV.zeros[Double](df.length)
     val coeff3 = BDV.zeros[Double](df.length)
     val coeff4 = BDV.zeros[Double](df.length)
 
-    val absc =  if (n_integ % 2 == 0)  n_integ + 1 else  n_integ
-
     val (degs, f_to_integrate) = if (one_sided) {
       (BDV[Int](1,2,3,4), f_to_integrate_one(_, _, _))
     } else {
       (BDV[Int](2,4,6,8), f_to_integrate_two(_, _, _))
     }
-
+    val integrator = new GaussKronrod(1e-8, 100);
     for (i <- 0 until df.length) {
-      coeff1(i) = simpsonBreeze((x) => {f_to_integrate(x, df(i), degs(0))}, -8, 8, absc)
-      coeff2(i) = simpsonBreeze((x) => {f_to_integrate(x, df(i), degs(1))}, -8, 8, absc)
-      coeff3(i) = simpsonBreeze((x) => {f_to_integrate(x, df(i), degs(2))}, -8, 8, absc)
-      coeff4(i) = simpsonBreeze((x) => {f_to_integrate(x, df(i), degs(3))}, -8, 8, absc)
+      coeff1(i) = integrator.integrate((x) => {f_to_integrate(x, df(i), degs(0))}, -8, 8).estimate
+      coeff2(i) = integrator.integrate((x) => {f_to_integrate(x, df(i), degs(1))}, -8, 8).estimate
+      coeff3(i) = integrator.integrate((x) => {f_to_integrate(x, df(i), degs(2))}, -8, 8).estimate
+      coeff4(i) = integrator.integrate((x) => {f_to_integrate(x, df(i), degs(3))}, -8, 8).estimate
     }
     return (coeff1, coeff2, coeff3, coeff4)
   }
