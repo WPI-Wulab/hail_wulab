@@ -4,10 +4,12 @@ import is.hail.HailContext
 import is.hail.annotations.{Annotation, UnsafeRow, Region}
 import is.hail.backend.ExecuteContext
 import is.hail.expr.ir.{IntArrayBuilder, MatrixValue, TableValue}
-import is.hail.types.physical.{PArray, PStruct}
+
 import is.hail.expr.ir.functions.MatrixToTableFunction
-import is.hail.stats.RegressionUtils
+// import is.hail.stats.RegressionUtils
+import is.hail.types.physical.{PArray, PStruct, PCanonicalNDArray, PType, PField}
 import is.hail.types.virtual.{MatrixType, TFloat64, TStruct, TableType}
+
 import is.hail.utils._
 
 import org.apache.spark.rdd.RDD
@@ -40,6 +42,7 @@ case class GFisher(
     val newrdd = groupedRDD.map{case(key, vals) =>
       println("vals")
       val valArr = vals.toArray
+      val (_, pval, df, w, M) = tupleArrayToVectorTuple(valArr)
       println(valArr(0))
       Row(key, 0.0, 3.0)
     }
@@ -48,6 +51,52 @@ case class GFisher(
 }
 
 object GFisherPrepareMatrix {
+
+  def setMeanImputedDoubles(
+    data: Array[Double],
+    offset: Int,
+    completeColIdx: Array[Int],
+    missingCompleteCols: IntArrayBuilder,
+    ptr: Long,
+    fullRowType: PStruct,
+    entryArrayType: PType,
+    // entryArrayType: PType,
+    // entryType: PStruct,
+    entryArrayIdx: Int,
+    fieldIdx: Int,
+  ): Unit = {
+
+    missingCompleteCols.clear()
+    val n = completeColIdx.length
+    var sum = 0.0
+    val entryArrayOffset = fullRowType.loadField(ptr, entryArrayIdx)
+
+    var j = 0
+    while (j < n) {
+      val k = completeColIdx(j)
+      // if (entryArrayType.isElementDefined(entryArrayOffset, k)) {
+      // val entryOffset = entryArrayType.loadElement(entryArrayOffset, k)
+        // if (entryType.isFieldDefined(entryOffset, fieldIdx)) {
+          // val fieldOffset = entryType.loadField(entryOffset, fieldIdx)
+      // val e = Region.loadDouble(entryOffset)
+      val e = 0.0
+      sum += e
+      data(offset + j) = e
+        // } else
+          // missingCompleteCols += j
+      // } else
+        // missingCompleteCols += j
+      j += 1
+    }
+
+    val nMissing = missingCompleteCols.size
+    val mean = sum / (n - nMissing)
+    var i = 0
+    while (i < nMissing) {
+      data(offset + missingCompleteCols(i)) = mean
+      i += 1
+    }
+  }
 
   def prepMatrixTable(
     mv: MatrixValue,
@@ -59,10 +108,10 @@ object GFisherPrepareMatrix {
     rowIdxField: String
   ): RDD[(Annotation, Iterable[(Int, Double, Int, Double, BDV[Double])])] = {
 
-    val fullRowType = mv.rvRowPType
-    val keyStructField = fullRowType.field(keyField)
-    val keyIndex = keyStructField.index
-    val keyType = keyStructField.typ
+    val fullRowType: PStruct = mv.rvRowPType
+    val keyStructField:PField = fullRowType.field(keyField)
+    val keyIndex: Int = keyStructField.index
+    val keyType: PType = keyStructField.typ
 
     // get the field the p-value is in
     val pStructField = fullRowType.field(pField)
@@ -83,9 +132,10 @@ object GFisherPrepareMatrix {
     // get the field the correlation is in
     val corrStructField = fullRowType.field(corrField)
     val corrIndex = corrStructField.index
-    val corrArrayType = fullRowType.types(corrIndex).asInstanceOf[PArray]
-    val entryType = corrArrayType.elementType.asInstanceOf[PStruct]
-    val fieldIdx = entryType.fieldIdx(corrField)
+    val corrArrayType = fullRowType.types(corrIndex)//.asInstanceOf[PArray]
+    // val entryType = corrArrayType.elementType.asInstanceOf[PStruct]
+    // val fieldIdx = entryType.fieldIdx(corrField)
+    val fieldIdx = corrIndex
 
     println("corrStructField")
     val n = mv.rvd.count().asInstanceOf[Int]
@@ -110,20 +160,27 @@ object GFisherPrepareMatrix {
             keyType.virtualType,
             UnsafeRow.read(keyType, ctx.r, fullRowType.loadField(ptr, keyIndex)),
           )
-          val data = new Array[Double](n)
 
-          RegressionUtils.setMeanImputedDoubles(
-            data,
-            0,
-            completeColIdxBc.value,
-            new IntArrayBuilder(),
-            ptr,
-            fullRowType,
-            corrArrayType,
-            entryType,
-            corrIndex,
-            fieldIdx,
-          )
+
+          // val data = new Array[Double](n)
+
+          // setMeanImputedDoubles(
+          //   data,
+          //   0,
+          //   completeColIdxBc.value,
+          //   new IntArrayBuilder(),
+          //   ptr,
+          //   fullRowType,
+          //   corrArrayType,
+          //   // corrArrayType,
+          //   // entryType,
+          //   corrIndex,
+          //   fieldIdx,
+          // )
+
+          // val data = Array(rowIdx * 1.0, math.pow(rowIdx,2.0), math.pow(rowIdx, 3.0))
+          val data = Array.fill(n)(0.3)
+          data(rowIdx) = 1.0
           Some((key, (rowIdx, pval, df, weight, BDV(data))))
         } else None
       }
