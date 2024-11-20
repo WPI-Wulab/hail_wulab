@@ -52,6 +52,17 @@ case class GFisher(
 
 object GFisherPrepareMatrix {
 
+  /**
+    * Collects the required fields and groups by key.
+    *
+    * @param mv the MatrixValue of our hail MatrixTable
+    * @param keyField what we are grouping by
+    * @param pField field the p-values are in
+    * @param dfField field storing degrees of freedom
+    * @param weightField field storing weights
+    * @param corrField field storing correlation
+    * @param rowIdxField field storing the row index
+    */
   def prepMatrixTable(
     mv: MatrixValue,
     keyField: String,
@@ -89,12 +100,12 @@ object GFisherPrepareMatrix {
     mv.rvd.mapPartitions { (ctx, it) =>
       it.flatMap { ptr =>
 
-
         val keyIsDefined = fullRowType.isFieldDefined(ptr, keyIndex)
         val weightIsDefined = fullRowType.isFieldDefined(ptr, weightIndex)
         val pIsDefined = fullRowType.isFieldDefined(ptr, pIndex)
         val dfIsDefined = fullRowType.isFieldDefined(ptr, dfIndex)
         val rowIdxIsDefined = fullRowType.isFieldDefined(ptr, rowIdxIndex)
+
         if (keyIsDefined && weightIsDefined && pIsDefined && dfIsDefined && rowIdxIsDefined) {
           val weight = Region.loadDouble(fullRowType.loadField(ptr, weightIndex))
           val pval = Region.loadDouble(fullRowType.loadField(ptr, pIndex))
@@ -107,25 +118,33 @@ object GFisherPrepareMatrix {
             UnsafeRow.read(keyType, ctx.r, fullRowType.loadField(ptr, keyIndex)),
           )
 
-          val data = new Array[Double](n)
+          val corrArr = new Array[Double](n)// array that will hold the correlation vector of this row
 
+          // get the correlation values and make sure they aren't all missing/NaN
           val notAllNA = setArrayMeanImputedDoubles(
-            data,
+            corrArr,
             ptr,
             fullRowType,
             corrField
           )
           if (notAllNA){
-            data(rowIdx) = 1.0
-            Some((key, (rowIdx, pval, df, weight, BDV(data))))
+            corrArr(rowIdx) = 1.0
+            Some((key, (rowIdx, pval, df, weight, BDV(corrArr))))
           } else None
 
         } else None
       }
     }.groupByKey()
-    // println("corrStructField")
   }
 
+  /**
+    * Collects values from a hail array into a scala array, replacing missing values with a mean. returns false if every value is missing/NaN
+    *
+    * @param data array to fill
+    * @param ptr pointer created in MatrixValue.rvd.mapPartitions.flatMat
+    * @param rvRowType the MatrixValue.rowPType
+    * @param arrFieldName name of the array field in the MatrixValue
+    */
   def setArrayMeanImputedDoubles(
     data: Array[Double],
     ptr: Long,
@@ -138,6 +157,7 @@ object GFisherPrepareMatrix {
     val arrOffset = rvRowType.loadField(ptr, arrFieldIdx)// Long
     val arrType = (rvRowType.types(arrFieldIdx)).asInstanceOf[PCanonicalArray] // PCanonicalArray? hopefully?
 
+    // stores indices of elements that are missing or NaN
     val nanElts = new IntArrayBuilder()
     val n = data.length
     var sum = 0.0
@@ -158,11 +178,13 @@ object GFisherPrepareMatrix {
 
     val nMissing = nanElts.size
 
+    //if they were also missing
     if (nMissing == n) return false
 
     val mean = sum / (n - nMissing)
 
     i = 0
+    // replace the missing values with the mean
     while (i < nMissing) {
       data(nanElts(i)) = mean
       i += 1
