@@ -86,15 +86,11 @@ object GFisherPrepareMatrix {
 
     val rowIdxIndex = fullRowType.field(rowIdxField).index
 
-    println("corrStructField")
     val n = mv.rvd.count().asInstanceOf[Int]
-    val completeColIdx = (0 until n).toArray
-    val completeColIdxBc = HailContext.backend.broadcast(completeColIdx)
 
     mv.rvd.mapPartitions { (ctx, it) =>
       it.flatMap { ptr =>
 
-        // println(s"ptr class: ${ptr.getClass}, ptr: $ptr")
 
         val keyIsDefined = fullRowType.isFieldDefined(ptr, keyIndex)
         val weightIsDefined = fullRowType.isFieldDefined(ptr, weightIndex)
@@ -115,18 +111,17 @@ object GFisherPrepareMatrix {
 
           val data = new Array[Double](n)
 
-          setArrayMeanImputedDoubles(
+          val notAllNA = setArrayMeanImputedDoubles(
             data,
-            completeColIdxBc.value,
             ptr,
             fullRowType,
             corrField
           )
+          if (notAllNA){
+            data(rowIdx) = 1.0
+            Some((key, (rowIdx, pval, df, weight, BDV(data))))
+          } else None
 
-          // val data = Array(rowIdx * 1.0, math.pow(rowIdx,2.0), math.pow(rowIdx, 3.0))
-          // val data = Array.fill(n)(0.3)
-          data(rowIdx) = 1.0
-          Some((key, (rowIdx, pval, df, weight, BDV(data))))
         } else None
       }
     }.groupByKey()
@@ -135,39 +130,46 @@ object GFisherPrepareMatrix {
 
   def setArrayMeanImputedDoubles(
     data: Array[Double],
-    completeColIdx: Array[Int],
     ptr: Long,
     rvRowType: PStruct,
     arrFieldName: String
-  ): Unit = {
+  ): Boolean = {
+
     val arrField = rvRowType.field(arrFieldName)// PField
     val arrFieldIdx = arrField.index // Int
     val arrOffset = rvRowType.loadField(ptr, arrFieldIdx)// Long
     val arrType = (rvRowType.types(arrFieldIdx)).asInstanceOf[PCanonicalArray] // PCanonicalArray? hopefully?
 
-    val missingCompleteCols = new IntArrayBuilder()
-    val n = completeColIdx.length
+    val nanElts = new IntArrayBuilder()
+    val n = data.length
     var sum = 0.0
-    var j = 0
-    while (j < n) {
-      val k = completeColIdx(j)
-      if (arrType.isElementDefined(arrOffset, k)) {
-        val entryOffset = arrType.loadElement(arrOffset, k)// Long
-        val e = Region.loadDouble(entryOffset)
-        sum += e
-        data(j) = e
-      } else
-          missingCompleteCols += j
-      j += 1
-    }
-
-    val nMissing = missingCompleteCols.size
-    val mean = sum / (n - nMissing)
     var i = 0
-    while (i < nMissing) {
-      data(missingCompleteCols(i)) = mean
+    while (i < n) {
+      if (arrType.isElementDefined(arrOffset, i)) {
+        val entryOffset = arrType.loadElement(arrOffset, i)// Long
+        val elt = Region.loadDouble(entryOffset)
+        if (! elt.isNaN) {
+          sum += elt
+          data(i) = elt
+        } else
+            nanElts += i
+      } else
+          nanElts += i
       i += 1
     }
+
+    val nMissing = nanElts.size
+
+    if (nMissing == n) return false
+
+    val mean = sum / (n - nMissing)
+
+    i = 0
+    while (i < nMissing) {
+      data(nanElts(i)) = mean
+      i += 1
+    }
+    return true
   }
 
 }
