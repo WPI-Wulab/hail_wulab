@@ -1,6 +1,5 @@
 package is.hail.methods.gfisher
 
-import is.hail.HailContext
 import is.hail.annotations.{Annotation, UnsafeRow, Region}
 import is.hail.backend.ExecuteContext
 import is.hail.expr.ir.{IntArrayBuilder, MatrixValue, TableValue}
@@ -15,7 +14,7 @@ import is.hail.utils._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Row
 
-import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
+import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 
 case class GFisher(
   keyField: String,
@@ -42,10 +41,9 @@ case class GFisher(
     val newrdd = groupedRDD.map{case(key, vals) =>
       val valArr = vals.toArray
 
-      val (_, pvals, df, w, corrMat) = tupleArrayToVectorTuple(valArr)
-      val gFishStat = StatGFisher.statGFisher(pvals, df, w)
-      val gFishPVal = PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
-      println(s"key $key\n$corrMat\n")
+      val (_, pvals: BDV[Double], df: BDV[Int], w: BDV[Double], corrMat: BDM[Double]) = tupleArrayToVectorTuple(valArr)
+      val gFishStat: Double = StatGFisher.statGFisher(pvals, df, w)
+      val gFishPVal: Double = PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
       Row(key, gFishStat, gFishPVal)
     }
     TableValue(ctx, typ(mv.typ).rowType, typ(mv.typ).key, newrdd)
