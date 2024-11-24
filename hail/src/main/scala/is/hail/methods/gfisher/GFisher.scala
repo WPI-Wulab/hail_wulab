@@ -1,3 +1,6 @@
+/**
+  * @author Peter Howell
+  */
 package is.hail.methods.gfisher
 
 import is.hail.annotations.{Annotation, UnsafeRow, Region}
@@ -15,7 +18,20 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Row
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
-
+/**
+  * Generalized Fisher's combination testing.
+  *
+  * @author Peter Howell
+  *
+  * @param keyField name of field to group by
+  * @param pField name of field containing p-values
+  * @param dfField name of field containing degrees of freedom
+  * @param weightField name of field containing weights
+  * @param corrField name of field containing correlation arrays
+  * @param rowIDXField name of field containing indices of the rows in the correlation matrix
+  * @param method which method to use. Either HYB, MR, or GB
+  * @param oneSided whether the input p-values are one-sided
+  */
 case class GFisher(
   keyField: String,
   pField: String,
@@ -23,6 +39,8 @@ case class GFisher(
   weightField: String,
   corrField: String,
   rowIDXField: String,
+  method: String,
+  oneSided: Boolean
 ) extends MatrixToTableFunction {
 
   override def typ(childType: MatrixType): TableType = {
@@ -39,11 +57,13 @@ case class GFisher(
   def execute(ctx: ExecuteContext, mv: MatrixValue): TableValue = {
     val groupedRDD = GFisherPrepareMatrix.prepMatrixTable(mv, keyField, pField, dfField, weightField, corrField, rowIDXField)
     val newrdd = groupedRDD.map{case(key, vals) =>
-      val valArr = vals.toArray
+      val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
       val (_, pvals: BDV[Double], df: BDV[Int], w: BDV[Double], corrMat: BDM[Double]) = tupleArrayToVectorTuple(valArr)
       val gFishStat: Double = StatGFisher.statGFisher(pvals, df, w)
-      val gFishPVal: Double = PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
+      val gFishPVal: Double = if (method == "HYB") PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
+                              else if (method == "MR") 0.01  //*@TODO PGFisher.pGFisherMR
+                              else 0.01  //*@TODO PGFisher.pGFisherGB
       Row(key, gFishStat, gFishPVal)
     }
     TableValue(ctx, typ(mv.typ).rowType, typ(mv.typ).key, newrdd)
