@@ -13,10 +13,14 @@ from hail.expr import (
     StructExpression,
     analyze,
     expr_any,
+    expr_array,
     expr_call,
     expr_float64,
+    expr_int32,
+    expr_int64,
     expr_locus,
     expr_numeric,
+    expr_oneof,
     matrix_table_source,
     raise_unless_column_indexed,
     raise_unless_entry_indexed,
@@ -3121,19 +3125,31 @@ def matrixtable_entry_grouped_sum(key_expr, x) -> Table:
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 
 
-def gfisher_thing(key, pval, df, w, corr, row_idx):
+@typecheck(
+    key=expr_any,
+    pval=expr_float64,
+    df=expr_int32,
+    w=expr_float64,
+    corr=expr_array(expr_float64),
+    corr_idx=expr_oneof(expr_int32, expr_int64),
+    method=str,
+    one_sided=bool,
+)
+def gfisher_thing(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
     """Run GFisher Analysis on a dataset
 
     Args:
-        key (_type_): _description_
-        pval (_type_): _description_
-        df (_type_): _description_
-        w (_type_): _description_
-        corr (_type_): _description_
-        row_idx (_type_): _description_
+        key (expr_any): row expression to group by.
+        pval (expr_float64): row expression of p-values
+        df (expr_int32): row expression of degrees of freedom
+        w (expr_float64): row expression of weights
+        corr (expr_array): row expression containing rows of the correlation matrix (contains the row of the correlation matrix corresponding to this row's SNP)
+        corr_idx (expr_int32): row expression containing the index this row corresponds to in the original correlation matrix.
+        method (str, optional): which method to use. Either "HYB" (default) for moment ratio matching by quadratic approximation, "MR" for simulation-assisted moment ratio matching, or "GB" for Brown's method with calculated variance.
+        one_sided (bool, optional): whether the input p-values were one-sided or not. Defaults to False.
 
     Returns:
-        _type_: _description_
+        hl.Table: table containing the GFisher statistic and
 
     Examples:
     ```python
@@ -3154,8 +3170,12 @@ def gfisher_thing(key, pval, df, w, corr, row_idx):
     """
     mt = matrix_table_source("gfisher_thing", key)
     mt = mt._select_all(
-        row_exprs={'__key': key, '__pvalue': pval, '__weight': w, '__corr': corr, '__df': df, '__rowIdx': row_idx}
+        row_exprs={'__key': key, '__pvalue': pval, '__weight': w, '__corr': corr, '__df': df, '__rowIdx': corr_idx}
     )
+
+    if method not in ["HYB", "MR", "GB"]:
+        raise ValueError(f'gfisher: method must be one of "HYB", "MR", "GB". received value "{method}"')
+
     config = {
         'name': 'GFisher',
         'keyField': '__key',
@@ -3164,6 +3184,8 @@ def gfisher_thing(key, pval, df, w, corr, row_idx):
         'weightField': '__weight',
         'corrField': '__corr',
         'rowIDXField': '__rowIdx',
+        'method': method,
+        'oneSided': one_sided,
     }
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 
