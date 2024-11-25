@@ -3135,7 +3135,7 @@ def matrixtable_entry_grouped_sum(key_expr, x) -> Table:
     method=str,
     one_sided=bool,
 )
-def gfisher_thing(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
+def gfisher(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
     """Run GFisher Analysis on a dataset
 
     Args:
@@ -3165,10 +3165,10 @@ def gfisher_thing(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=Fals
     row_cor = hl.row_correlation(mt.X)
     rce = row_cor.to_table_row_major()
     mt = mt.annotate_rows(row_cor=rce[mt.row_idx].entries, pval=pval_ht[mt.row_key].p_value)
-    hl.gfisher_thing(mt.gene, mt.pval, mt.df, mt.weight, mt.row_cor, mt.row_idx)
+    hl.gfisher(mt.gene, mt.pval, mt.df, mt.weight, mt.row_cor, mt.row_idx)
     ```
     """
-    mt = matrix_table_source("gfisher_thing", key)
+    mt = matrix_table_source("gfisher", key)
     mt = mt._select_all(
         row_exprs={'__key': key, '__pvalue': pval, '__weight': w, '__corr': corr, '__df': df, '__rowIdx': corr_idx}
     )

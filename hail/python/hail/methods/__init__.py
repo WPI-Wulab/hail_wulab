@@ -53,7 +53,7 @@ from .statgen import (
     filter_alleles,
     filter_alleles_hts,
     genetic_relatedness_matrix,
-    gfisher_thing,
+    gfisher,
     hwe_normalized_pca,
     impute_sex,
     lambda_gc,
@@ -75,7 +75,7 @@ from .statgen import (
 
 __all__ = [
     'trio_matrix',
-    'gfisher_thing',
+    'gfisher',
     'linear_mixed_model',
     'skat',
     'matrixtable_entry_grouped_sum',
