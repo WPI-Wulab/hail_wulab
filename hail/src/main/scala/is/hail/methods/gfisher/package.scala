@@ -52,17 +52,6 @@ package object gfisher {
   }
 
   /**
-    * Subset the rows of a matrix. The order of the indices given does not matter.
-    *
-    * @param X a matrix
-    * @param rows the indicies of rows to keep
-    */
-  def subsetBDMRows(X: BDM[Double], rows: Array[Int]): BDM[Double] = {
-    val Xidx: BDV[Boolean] = BDV((0 to X.rows).toArray.map(rows.contains(_)))
-    return X(Xidx, ::).toDenseMatrix
-  }
-
-  /**
     * Code to convert a covariance matrix to a correlation matrix. Should mimic R's function.
     *
     * @param X
@@ -81,8 +70,6 @@ package object gfisher {
     val aX = abs(X)
     return max(sum(aX(*, ::)))
   }
-
-
 
   /**
     * Code that copies R's code for getting the nearest positive definite matrix to an approximate one
