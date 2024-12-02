@@ -63,7 +63,7 @@ case class GFisher(
       val gFishStat: Double = StatGFisher.statGFisher(pvals, df, w)
       val gFishPVal: Double = if (method == "HYB") PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
                               else if (method == "MR") 0.01  //*@TODO PGFisher.pGFisherMR
-                              else 0.01  //*@TODO PGFisher.pGFisherGB
+                              else PGFisher.pGFisherGB(gFishStat, df, w, corrMat)
       Row(key, gFishStat, gFishPVal)
     }
     TableValue(ctx, typ(mv.typ).rowType, typ(mv.typ).key, newrdd)

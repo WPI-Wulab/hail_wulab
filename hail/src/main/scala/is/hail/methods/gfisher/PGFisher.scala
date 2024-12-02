@@ -37,4 +37,28 @@ object PGFisher {
     return Gamma.cumulative(x, a, 1.0, false, false)
   }
 
+  /**
+    * Get P-values using brown's method with calculated variance
+    *
+    * @param q GFisher test statistic
+    * @param df n-dimensional vector of degrees of freedom
+    * @param w n-dimensional vector of weights
+    * @param M n by n correlation matrix
+    * @param GM n by n correlation matrix between w_1 T_1, ..., w_n T_n, which is the output of getGFisherGM
+    */
+  def pGFisherGB(
+    q: Double,
+    df: BDV[Int],
+    w: BDV[Double],
+    M: BDM[Double]
+  ): Double = {
+    w := w / sum(w)
+    val GM: BDM[Double] = GFisherGM.getGFisherGM(df, w, M, false)
+    val mu: Double = w dot convert(df, Double)
+    val sigma2: Double = sum(GM)
+    val a: Double = math.pow(mu, 2.0) / sigma2
+    val x: Double = (q - mu) * math.sqrt(a) / math.sqrt(sigma2) + a
+    return Gamma.cumulative(x, a, 1.0, false, false)
+  }
+
 }
