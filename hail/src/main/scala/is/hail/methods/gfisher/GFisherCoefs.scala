@@ -1,6 +1,6 @@
 package is.hail.methods.gfisher
 
-import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
+import breeze.linalg.{DenseVector => BDV}
 import net.sourceforge.jdistlib.{ChiSquare, Normal}
 
 import is.hail.GaussKronrod
@@ -12,7 +12,7 @@ object GFisherCoefs {
     * Compute hermite polynomil for a scalar input
     *
     * @param x input
-    * @param degree degree of polynomial
+    * @param degree degree of polynomial. should be 1, 2, 3, 4, 6, or 8
     */
   def hermite_scalar(x: Double, degree: Int): Double = {
     if (degree == 1) return x
