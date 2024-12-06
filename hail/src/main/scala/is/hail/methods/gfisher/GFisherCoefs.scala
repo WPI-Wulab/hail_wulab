@@ -54,6 +54,48 @@ object GFisherCoefs {
   }
 
   /**
+    * Perform the integration to compute coefficients necessary for the GFisherGM Matrix for one-sided p-values
+    *
+    * @param df vector of degrees of freedom
+    * @return 4 coefficient vectors, each the same length as `df`
+    */
+  def getGFisherCoefs1(df: BDV[Int]): (BDV[Double], BDV[Double], BDV[Double], BDV[Double]) = {
+    val degs = Array(1,2,3,4)
+    val dfUnique = df.data.distinct
+    val integrator = new GaussKronrod(1e-8, 100)
+    // a lot going here. If any of the degrees of freedom are duplicates, the coefficients will be the same
+    // so we only need to calculate a coefficient once for each distinct degree of freedom. This just does that.
+    // we get the distinct values and then calculate the coefficients for each of them.
+    // Then we create a Map (which is just like a python dictionary), to map the distinct coefficients back to the original vector
+    val c1 = dfUnique.map((d) => d -> integrator.integrate(f_to_integrate_one(_, d, degs(0)), -8, 8).estimate).toMap
+    val c2 = dfUnique.map((d) => d -> integrator.integrate(f_to_integrate_one(_, d, degs(1)), -8, 8).estimate).toMap
+    val c3 = dfUnique.map((d) => d -> integrator.integrate(f_to_integrate_one(_, d, degs(2)), -8, 8).estimate).toMap
+    val c4 = dfUnique.map((d) => d -> integrator.integrate(f_to_integrate_one(_, d, degs(3)), -8, 8).estimate).toMap
+    return (df.map(c1), df.map(c2), df.map(c3), df.map(c4))
+  }
+
+  /**
+    * Perform the integration to compute coefficients necessary for the GFisherGM Matrix for two-sided p-values
+    *
+    * @param df vector of degrees of freedom
+    * @return 4 coefficient vectors, each the same length as `df`
+    */
+  def getGFisherCoefs2(df: BDV[Int]): (BDV[Double], BDV[Double], BDV[Double], BDV[Double]) = {
+    val degs = Array(2,4,6,8)
+    val dfUnique = df.data.distinct
+    val integrator = new GaussKronrod(1e-8, 100)
+    // a lot going here. If any of the degrees of freedom are duplicates, the coefficients will be the same
+    // so we only need to calculate a coefficient once for each distinct degree of freedom. This just does that.
+    // we get the distinct values and then calculate the coefficients for each of them.
+    // Then we create a Map (which is just like a python dictionary), to map the distinct coefficients back to the original vector
+    val c1 = dfUnique.map((d) => d -> integrator.integrate(f_to_integrate_two(_, d, degs(0)), -8, 8).estimate).toMap
+    val c2 = dfUnique.map((d) => d -> integrator.integrate(f_to_integrate_two(_, d, degs(1)), -8, 8).estimate).toMap
+    val c3 = dfUnique.map((d) => d -> integrator.integrate(f_to_integrate_two(_, d, degs(2)), -8, 8).estimate).toMap
+    val c4 = dfUnique.map((d) => d -> integrator.integrate(f_to_integrate_two(_, d, degs(3)), -8, 8).estimate).toMap
+    return (df.map(c1), df.map(c2), df.map(c3), df.map(c4))
+  }
+
+  /**
     * Compute necessary coefficients for estimating the covariance of the test statistics
     *
     * @param df vector of degrees of freedom
@@ -65,25 +107,8 @@ object GFisherCoefs {
     df: BDV[Int],
     one_sided:Boolean = false,
   ): (BDV[Double], BDV[Double],BDV[Double],BDV[Double]) = {
-    // val x = linspace(-8, 8, n_integ)
-    val coeff1 = BDV.zeros[Double](df.length)
-    val coeff2 = BDV.zeros[Double](df.length)
-    val coeff3 = BDV.zeros[Double](df.length)
-    val coeff4 = BDV.zeros[Double](df.length)
-
-    val (degs, f_to_integrate) = if (one_sided) {
-      (BDV[Int](1,2,3,4), f_to_integrate_one(_, _, _))
-    } else {
-      (BDV[Int](2,4,6,8), f_to_integrate_two(_, _, _))
-    }
-    val integrator = new GaussKronrod(1e-8, 100);
-    for (i <- 0 until df.length) {
-      coeff1(i) = integrator.integrate((x) => {f_to_integrate(x, df(i), degs(0))}, -8, 8).estimate
-      coeff2(i) = integrator.integrate((x) => {f_to_integrate(x, df(i), degs(1))}, -8, 8).estimate
-      coeff3(i) = integrator.integrate((x) => {f_to_integrate(x, df(i), degs(2))}, -8, 8).estimate
-      coeff4(i) = integrator.integrate((x) => {f_to_integrate(x, df(i), degs(3))}, -8, 8).estimate
-    }
-    return (coeff1, coeff2, coeff3, coeff4)
+    if (one_sided) return getGFisherCoefs1(df)
+    return getGFisherCoefs2(df)
   }
 
 }
