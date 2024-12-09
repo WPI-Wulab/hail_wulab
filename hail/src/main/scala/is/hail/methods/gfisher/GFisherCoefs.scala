@@ -8,28 +8,7 @@ import is.hail.GaussKronrod
 
 object GFisherCoefs {
 
-  /**
-    * Compute hermite polynomil for a scalar input
-    *
-    * @param x input
-    * @param degree degree of polynomial. should be 1, 2, 3, 4, 6, or 8
-    */
-  def hermite_scalar(x: Double, degree: Int): Double = {
-    if (degree == 1) return x
-    val x2 = x * x
-    if (degree == 2) return x2 - 1.0
-    if (degree == 3) return (x2 * x) - (3.0 * x)
 
-    val x4 = x2 * x2
-
-    if (degree == 4) return x4 - (6.0 * x2) + 3.0
-
-    val x6 = x4 * x2
-
-    if (degree == 6) return x6 - (15.0 * x4) + (45.0 * x2) - 15.0
-    assert(degree == 8)
-    return x4 * x4 - (28.0 * x6) + (210.0 * x4) - (420.0 * x2) + 105.0
-  }
 
   /**
     * function to integrate if p-values are two-sided

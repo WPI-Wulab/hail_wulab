@@ -11,6 +11,25 @@ import breeze.numerics.{abs, sqrt}
 package object gfisher {
 
   /**
+    * Compute hermite polynomil for a scalar input
+    *
+    * @param x input
+    * @param degree degree of polynomial. should be 1, 2, 3, 4, 6, or 8
+    */
+  def hermite_scalar(x: Double, degree: Int): Double = {
+    return degree match {
+      case 1 => x
+      case 2 => x*x - 1.0
+      case 3 => math.pow(x, 3.0) - 3.0 * x
+      case 4 => math.pow(x, 4.0) - 6.0   * math.pow(x, 2.0) + 3.0
+      case 5 => math.pow(x, 5.0) - 10.0  * math.pow(x, 3.0) + 15.0  * x
+      case 6 => math.pow(x, 6.0) - 15.0  * math.pow(x, 4.0) + 45.0  * math.pow(x, 2.0) - 15.0
+      case 7 => math.pow(x, 7.0) - 21.0  * math.pow(x, 5.0) + 105.0 * math.pow(x, 3.0) - 105.0 * x
+      case _ => math.pow(x, 8.0) - 28.0  * math.pow(x, 6.0) + 210.0 * math.pow(x, 4.0) - 420.0 * math.pow(x, 2.0) + 105.0
+    }
+  }
+
+  /**
     * Convert an array of vectors to a matrix. Column major order.
     *
     * @param a array containing
@@ -22,7 +41,6 @@ package object gfisher {
     val c0 = a(0)._5
     require(c0.offset == 0 && c0.stride == 1)
     val m: Int = a.length // number of rows that were put in this group
-    val n: Int = a(0)._5.size // number of elements in the correlation vector
 
     val rowIdxArr = new Array[Int](m)
     val pvalArr = new Array[Double](m)
