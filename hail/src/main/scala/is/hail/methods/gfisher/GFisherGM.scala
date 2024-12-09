@@ -13,8 +13,6 @@ object GFisherGM {
     * @param w n-dimensional vector of weights
     * @param M n by n matrix correlation matrix
     * @param one_sided whether the p-values are one-sided or not
-    * @param n_integ number of points to integrate along. passed to GFisherCoefs.getGFisherCoeffs
-    * @param method method of numerical integration. passed to GFisherCoefs.getGFisherCoeffs
     */
   def getGFisherGM(
     df: BDV[Int],
