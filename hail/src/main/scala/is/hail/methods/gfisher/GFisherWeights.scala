@@ -4,6 +4,8 @@ import is.hail.GaussKronrod
 
 import breeze.linalg.{DenseVector => BDV, DenseMatrix => BDM, _}
 
+import net.sourceforge.jdistlib.Normal
+
 object GFisherWeights {
 
 
@@ -30,6 +32,13 @@ object GFisherWeights {
   def E_gX_p(g: Double => Double, mu: Double, p: Double, sigma:Double=1.0): Double = {
     val integrator = new GaussKronrod(1e-9, 100)
     return integrator.integrate((x) => math.pow(g(x), p) * Normal.density((x-mu)/sigma, 0, 1.0, false), mu-8*sigma, mu+8*sigma).estimate / sigma
+  }
+
+  def getWts(Sigma: BDM[Double], r: BDV[Double], forcePosW: Boolean=true, normalize:Boolean = true): BDV[Double] = {
+    val w = inv(Sigma) * r
+    if (forcePosW) w(w <:< 0.0) := 0.0
+    if (normalize) w := w /:/ sum(w)
+    return w
   }
 
 
