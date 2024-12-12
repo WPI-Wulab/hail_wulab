@@ -25,7 +25,7 @@ object GFisherCov {
     * @param pType "two" = two-sided, "one" = one-sided input p-values.
     * @return covariance of T(l) and T(r) in Corollary 2
     */
-  def getGFisherCov(D1: BDV[Double], D2: BDV[Double], W1: BDV[Double], W2: BDV[Double], M: BDM[Double], varCorrect: Boolean = true, pType: String = "two"): Double = {
+  def getGFisherCov(D1: BDV[Int], D2: BDV[Int], W1: BDV[Double], W2: BDV[Double], M: BDM[Double], varCorrect: Boolean = true, pType: String = "two"): Double = {
         val (coeff1_res1, coeff2_res1, coeff3_res1, coeff4_res1) = GFisherCoefs.getGFisherCoefs(D1.mapValues(_.toInt))
         val (coeff1_res2, coeff2_res2, coeff3_res2, coeff4_res2) = GFisherCoefs.getGFisherCoefs(D2.mapValues(_.toInt))
         val GM_cross = if (pType == "two") {

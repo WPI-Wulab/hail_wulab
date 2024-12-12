@@ -23,26 +23,17 @@ object GFisherCor {
     * @param pType "two" = two-sided, "one" = one-sided input p-values.
     * @return a correlation matrix between T(1), T(2),..., T(m) as calculated in Corollary 2.
     */
-  def getGFisherCor(DD: BDM[Double], W: BDM[Double], M: BDM[Double],
-                    varCorrect: Boolean = true, pType: String = "two"): BDM[Double] = {
-
-    val m = DD.rows  // Number of GFisher statistics (equivalent to dim(DD)[1] in R)
-    val COV = BDM.fill[Double](m, m)(Double.NaN)  // Initialize covariance matrix with NaN values
-
-    // Loop over the rows and columns of the covariance matrix
+  def getGFisherCor(DD: BDM[Int], W: BDM[Double], M: BDM[Double], varCorrect: Boolean = true, pType: String = "two"): BDM[Double] = {
+    val m = DD.rows
+    val COV = BDM.fill[Double](m, m)(Double.NaN)
     for (i <- 0 until m) {
       for (j <- i until m) {
         COV(i, j) = GFisherCov.getGFisherCov(DD(i, ::).t, DD(j, ::).t, W(i, ::).t, W(j, ::).t, M, varCorrect, pType)
       }
     }
-
-    // Fill the lower triangle of the matrix with the transpose of the upper triangle
     for (i <- 1 until m; j <- 0 until i) {
       COV(i, j) = COV(j, i)
     }
-
-    // Return the correlation matrix by normalizing the covariance matrix
     cov2cor(COV)
-    
     }
 }
