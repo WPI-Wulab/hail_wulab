@@ -51,7 +51,7 @@ object PGFisher {
     * @return flipped array of formatted ('initialized') nsim and seed inputs
     */
   def initializeParams(nsim: Option[Int], seed: Option[Int]): (Int, Option[Int]) = {
-    val initializedNsim = nsim.getOrElse(5000000)
+    val initializedNsim = nsim.getOrElse(50000)
     val initializedSeed = seed match {
       case Some(value) => Some(value)
       case None => None
