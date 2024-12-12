@@ -35,5 +35,6 @@ object GFisherCor {
       COV(i, j) = COV(j, i)
     }
     cov2cor(COV)
+
     }
 }
