@@ -36,6 +36,14 @@ object GFisherWeights {
     return integrator.integrate((x) => math.pow(g(x), p) * Normal.density((x-mu)/sigma, 0, 1.0, false), mu-8*sigma, mu+8*sigma).estimate / sigma
   }
 
+  /**
+    * Calculate the optimal weights of T = sum_i^n w_iT_i under Gaussian mixture model
+    *
+    * @param Sigma covariance matrix of T_1,...,T_n.
+    * @param r vector of E_1(T_i) - E_0(T_i), i=1,...,n.
+    * @param forcePosW if true, negative weights are set to 0.
+    * @param normalize if true, weights are normalized to sum to 1.
+    */
   def getWts(Sigma: BDM[Double], r: BDV[Double], forcePosW: Boolean=true, normalize:Boolean = true): BDV[Double] = {
     val w = inv(Sigma) * r
     if (forcePosW) w(w <:< 0.0) := 0.0
