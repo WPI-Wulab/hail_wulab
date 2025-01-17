@@ -5,10 +5,33 @@ import is.hail.utils.fatal
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
 import breeze.numerics.{abs, sqrt}
-// import net.sourceforge.jdistlib.{ChiSquare, Normal}
+
+import net.sourceforge.jdistlib.{ChiSquare, Normal}
 
 
 package object gfisher {
+
+  /**
+    * GFisher transformation function 'g' for two sided p-values
+    *
+    * @param x
+    * @param df
+    */
+  def gGFisher2(x: Double, df: Int=2): Double = {
+    return ChiSquare.quantile(
+      math.log(2.0) +
+      Normal.cumulative(
+        math.abs(x),
+        0.0,
+        1.0,
+        false, //lower tail
+        true //log_p
+      ),
+      df,
+      false, //lower_tail
+      true //log_p
+    )
+  }
 
   /**
     * Compute hermite polynomil for a scalar input

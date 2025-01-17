@@ -6,6 +6,8 @@ import breeze.linalg.{DenseVector => BDV, DenseMatrix => BDM, _}
 
 import net.sourceforge.jdistlib.Normal
 
+import org.apache.commons.math3.util.CombinatoricsUtils.factorialDouble
+
 object GFisherWeights {
 
 
@@ -41,16 +43,40 @@ object GFisherWeights {
     return w
   }
 
-  def covM_gXgY(g: Double => Double, mu1: BDV[Double], mu2: BDV[Double], M: BDM[Double], ORD: Seq[Int]): BDM[Double] = {
-    val integrator = new GaussKronrod(1e-8, 100)
-    val coef1 = BDM.tabulate(ORD.size, mu1.size){(i, j) => integrator.integrate((x) => g(x) * Normal.density(x-mu1(j), 0, 1, false) * hermite_shifted(x, mu1(j), ORD(i)), mu1(j)-8, mu1(j)+8.0).estimate}
-    val coef2 = BDM.tabulate(ORD.size, mu2.size){(i, j) => integrator.integrate((x) => g(x) * Normal.density(x-mu2(j), 0, 1, false) * hermite_shifted(x, mu2(j), ORD(i)), mu2(j)-8, mu1(j)+8.0).estimate}
-
+  /**
+    * Calculate Covariance matrix whose elements are Cov[g(Xi),g(Yj)] where X = Z + MU1 ~ MVN(MU1, M), Y = Z + MU2 ~ MVN(MU2, M)
+    *
+    * @param g transformation function
+    * @param mu1 mean vector of length n
+    * @param mu2 another mean vector of length n
+    * @param M a positive-definite correlation matrix
+    * @param ORD a sequence of orders of Hermite polynomials
+    */
+  def covM_gXgY(g: Double => Double, mu1: BDV[Double], mu2: BDV[Double], M: BDM[Double], ORD: Seq[Int]=Seq(1,2,3,4,5,6,7,8)): BDM[Double] = {
+    val integrator = new GaussKronrod(1e-9, 100)
+    val coef1 = BDM.tabulate(ORD.size, mu1.size){(i, j) =>
+      integrator.integrate(
+        (x) => g(x) * Normal.density(x-mu1(j), 0.0, 1.0, false) * hermite_shifted(x, mu1(j), ORD(i)),
+        mu1(j)-8.0,
+        mu1(j)+8.0
+      ).estimate
+    }
+    val coef2 = BDM.tabulate(ORD.size, mu2.size){(i, j) =>
+      integrator.integrate(
+        (x) => g(x) * Normal.density(x-mu2(j), 0.0, 1.0, false) * hermite_shifted(x, mu2(j), ORD(i)),
+        mu2(j)-8.0,
+        mu2(j)+8.0
+      ).estimate
+    }
+    val M_out = BDM.zeros[Double](mu1.size, mu1.size)
     for (ord <- ORD) {
-      coef2 := coef1 + coef2
+      // outer product of the rows of the coefficient matrices
+      // must subtract 1 from ord because scala is 0-indexed
+      M_out := M_out + (coef1(ord-1,::).t * coef2(ord-1,::)) *:* (M ^:^ (ord.toDouble) ) /:/ factorialDouble(ord)
     }
 
-    return coef2
+    return M_out
+  }
   }
 
 }
