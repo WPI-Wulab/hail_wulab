@@ -105,16 +105,16 @@ object GFisherWeights {
     M: BDM[Double],
     ORD: Seq[Int]= Seq(1,2,3,4,5,6,7,8)
   ): BDM[Double] = {
-    val pi2: BDM[Double] = pi * pi.t
+    val pp: BDM[Double] = pi * pi.t
     val q: BDV[Double] = 1.0 - pi
     val pq: BDM[Double] = pi * q.t
     val qq: BDM[Double] = q * q.t
-    val covM: BDM[Double] = covM_gXgY(g, mu, mu, M, (0 to 8).toList)
-    val covM0: BDM[Double] = covM_gXgY(g, mu, BDV.zeros[Double](mu.size), M, (0 to 8).toList)
-    val covM00: BDM[Double] = covM_gXgY(g, BDV.zeros[Double](mu.size), BDV.zeros[Double](mu.size), M, (0 to 8).toList)
-    val M_out = pp * covM + pq * covM0 + pq.t * CovM0.t + qq * covM00
-    diag(M_out) := varT_mix(g, mu, pi) // R code did this with sapply, so the arguments to varT_mix as a scalar function
-    return BDM.zeros[Double](1,1)
+    val covM: BDM[Double] = covM_gXgY(g, mu, mu, M, (1 to 8).toList)
+    val covM0: BDM[Double] = covM_gXgY(g, mu, BDV.zeros[Double](mu.size), M, (1 to 8).toList)
+    val covM00: BDM[Double] = covM_gXgY(g, BDV.zeros[Double](mu.size), BDV.zeros[Double](mu.size), M, (1 to 8).toList)
+    val M_out = (pp *:* covM) + (pq *:* covM0) + (pq.t *:* covM0.t) + (qq *:* covM00)
+    diag(M_out) := varT_mix(g, mu, pi) // R code did this with sapply, so the arguments to varT_mix are scalar
+    return M_out
   }
 
   /**
