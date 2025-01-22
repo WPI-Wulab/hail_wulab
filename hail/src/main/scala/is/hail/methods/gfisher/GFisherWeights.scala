@@ -125,9 +125,30 @@ object GFisherWeights {
     * @param pi
     */
   def varT_mix(g: (Double) => Double, mu: BDV[Double], pi: BDV[Double]): BDV[Double] = {
-    return pi *:* E_gX_p(g, mu, 2.0) + (1-pi) *:* E_gX_p(g, 0.0, 2.0)  - (E_T_mix(g, mu, pi))^:^2.0
+    return BDV.tabulate(mu.length){i => varT_mix(g, mu(i), pi(i))}
   }
 
+  /**
+    * Calculate Var[T_i], where T_i=g(Z_i), Z_i = Z_0i + mu_i*C_i, C_i ~ Bern(pi_i)
+    *
+    * @param g
+    * @param mu
+    * @param pi
+    */
+  def varT_mix(g: (Double) => Double, mu: Double, pi: Double): Double = {
+    return pi * E_gX_p(g, mu, 2.0) + (1.0 - pi) * E_gX_p(g, 0.0, 2.0)  - math.pow(E_T_mix(g, mu, pi), 2.0)
+  }
+
+  /**
+    * Calculate E[T_i], where T_i=g(Z_i), Z_i = Z_0i + mu_i*C_i, C_i ~ Bern(pi_i)
+    *
+    * @param g
+    * @param mu
+    * @param pi
+    */
+  def E_T_mix(g: (Double) => Double, mu: Double, pi: Double): Double = {
+    return pi * E_gX_p(g, mu, 1) + (1.0 - pi) * E_gX_p(g, 0.0, 1)
+  }
 
   /**
     * Calculate E[T_i], where T_i=g(Z_i), Z_i = Z_0i + mu_i*C_i, C_i ~ Bern(pi_i)
@@ -137,7 +158,9 @@ object GFisherWeights {
     * @param pi
     */
   def E_T_mix(g: (Double) => Double, mu: BDV[Double], pi: BDV[Double]): BDV[Double] = {
-    return pi * E_gX_p(g, mu, 1) + (1.0 - pi) * E_gX_p(g, 0.0, 1)
+    return BDV.tabulate(mu.length){i => E_T_mix(g, mu(i), pi(i))}
   }
+
+
 
 }
