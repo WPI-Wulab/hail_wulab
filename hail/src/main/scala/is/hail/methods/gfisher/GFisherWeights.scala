@@ -103,7 +103,7 @@ object GFisherWeights {
     mu: BDV[Double],
     pi: BDV[Double],
     M: BDM[Double],
-    ORD: Seq[Int]= Seq(1,2,3,4,5,6,7,8)
+    ORD: Seq[Int]= Seq(1,2,3,4,5,6,7,8) // never actually used (like in the R code)
   ): BDM[Double] = {
     val pp: BDM[Double] = pi * pi.t
     val q: BDV[Double] = 1.0 - pi
