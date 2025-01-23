@@ -60,6 +60,8 @@ object GFisherWeights {
     * @param mu2 another mean vector of length n
     * @param M a positive-definite correlation matrix
     * @param ORD a sequence of orders of Hermite polynomials
+    * @TODO ensure that ORD starts at 1 and is sequential
+    * alternatively: accept an integer that just represents number of terms to use
     */
   def covM_gXgY(g: Double => Double, mu1: BDV[Double], mu2: BDV[Double], M: BDM[Double], ORD: Seq[Int]=Seq(1,2,3,4,5,6,7,8)): BDM[Double] = {
     val integrator = new GaussKronrod(1e-9, 100)
