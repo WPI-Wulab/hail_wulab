@@ -162,6 +162,32 @@ object GFisherWeights {
     return BDV.tabulate(mu.length){i => E_T_mix(g, mu(i), pi(i))}
   }
 
+  def getSigma(g: (Double) => Double, mu: BDV[Double], pi: BDV[Double], M: BDM[Double], h1: Boolean = false): BDM[Double] = {
+    if (h1)
+      return covMT_mix(g, mu, pi, M)
+
+    val nullMu = BDV.zeros[Double](mu.size)
+    return covMT_mix(g, nullMu, nullMu, M)
+  }
+
+  def getR(g: (Double) => Double, mu: BDV[Double], pi: BDV[Double]): BDV[Double] = {
+    val n = mu.size
+    return BDV.tabulate(n){(i) => E_T_mix(g, mu(i), pi(i)) - E_T_mix(g, 0.0, 0.0) }
+  }
+
+  /**
+    * Calculate the vector of E_1(T_i)-E_0(T_i) for i=1,...,n
+    * where T_i=g(Z_i), Z_i = Z_0i + Ztilde_i, Ztilde_i ~ N(mu_i,sd_i), Z_0i~N(0,1)
+    *
+    * @param g transfrmation function of Z
+    * @param mu vector of mean mu_i, i=1,...,n.
+    * @param sd vector of standard deviations of Z_i, i=1,...,n.
+    */
+  def getRTilde(g: (Double) => Double, mu: BDV[Double], sd: BDV[Double]): BDV[Double] = {
+    val n = mu.size
+    return BDV.tabulate(n){(i) => E_gX_p(g, mu(i),  1.0, sd(i)) - E_gX_p(g, 0.0, 1.0, 1.0) }
+  }
+
 
 
 }
