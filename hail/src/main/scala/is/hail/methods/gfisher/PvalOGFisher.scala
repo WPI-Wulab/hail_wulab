@@ -1,7 +1,6 @@
 package is.hail.methods.gfisher
 
-import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
-import scala.math.{atan, Pi}
+import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 import breeze.stats.distributions.{Gaussian, CauchyDistribution, MultivariateGaussian}
 
 object PvalOGFisher {
@@ -33,7 +32,7 @@ object PvalOGFisher {
             val corGFisher = GFisherCor.getGFisherCor(DF, W, M, pType = pType)
             val regularizedCor = corGFisher + BDM.eye[Double](corGFisher.rows) * 1e-5
             val mean = BDV.zeros[Double](nd)
-            val lower = BDV.fill(nd)(Double.NegativeInfinity)
+            // val lower = BDV.fill(nd)(Double.NegativeInfinity)
             val upper = BDV.fill(nd)(Gaussian(0, 1).inverseCdf(1 - minpStat))
             val mvn = MultivariateGaussian(mean, regularizedCor)
 
