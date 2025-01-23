@@ -52,6 +52,18 @@ object GFisherWeights {
   }
 
   /**
+    * The function integrated by covM_gXgY
+    *
+    * @param x variable of integration
+    * @param g transformation function
+    * @param mu mean value
+    * @param ORD order of Hermite polynomial
+    */
+  def covM_Integrand(x: Double, g: Double => Double, mu: Double, ORD: Int): Double = {
+    return g(x) * Normal.density(x-mu, 0.0, 1.0, false) * hermite_shifted(x, mu, ORD)
+  }
+
+  /**
     * Calculate Covariance matrix whose elements are Cov[g(Xi),g(Yj)] where X = Z + MU1 ~ MVN(MU1, M), Y = Z + MU2 ~ MVN(MU2, M)
     *
     * @param g transformation function
@@ -64,14 +76,14 @@ object GFisherWeights {
     val integrator = new GaussKronrod(1e-9, 100)
     val coef1 = BDM.tabulate(ORD.size, mu1.size){(i, j) =>
       integrator.integrate(
-        (x) => g(x) * Normal.density(x-mu1(j), 0.0, 1.0, false) * hermite_shifted(x, mu1(j), ORD(i)),
+        (x) => covM_Integrand(x, g, mu1(j), ORD(i)),
         mu1(j)-8.0,
         mu1(j)+8.0
       ).estimate
     }
     val coef2 = BDM.tabulate(ORD.size, mu2.size){(i, j) =>
       integrator.integrate(
-        (x) => g(x) * Normal.density(x-mu2(j), 0.0, 1.0, false) * hermite_shifted(x, mu2(j), ORD(i)),
+        (x) => covM_Integrand(x, g, mu2(j), ORD(i)),
         mu2(j)-8.0,
         mu2(j)+8.0
       ).estimate
