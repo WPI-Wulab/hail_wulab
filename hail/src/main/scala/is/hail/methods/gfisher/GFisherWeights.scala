@@ -11,17 +11,6 @@ import org.apache.commons.math3.util.CombinatoricsUtils.factorialDouble
 object GFisherWeights {
 
 
-  /**
-    * Compute hermite polynomial of shifted value at certain degree
-    *
-    * @param x value
-    * @param mu value to shift by
-    * @param deg degree/order of hermite polynomial
-    */
-  def hermite_shifted(x: Double, mu: Double, deg: Int): Double = {
-    return hermite_scalar(x-mu, deg)
-  }
-
 
   /**
     * Calculate E[g(X)^p] where X~N(mu,sigma)
@@ -60,7 +49,7 @@ object GFisherWeights {
     * @param ORD order of Hermite polynomial
     */
   def covM_Integrand(x: Double, g: Double => Double, mu: Double, ORD: Int): Double = {
-    return g(x) * Normal.density(x-mu, 0.0, 1.0, false) * hermite_shifted(x, mu, ORD)
+    return g(x) * Normal.density(x-mu, 0.0, 1.0, false) * hermite(x - mu, ORD)
   }
 
   /**
