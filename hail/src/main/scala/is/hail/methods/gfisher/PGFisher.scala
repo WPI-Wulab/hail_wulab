@@ -1,9 +1,9 @@
 /*
 This file contains main and supportive functions for computing PGFisher p-values
-Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value 
+Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
 Creators: Peter Howell and Kylie Hoar
-Last update (latest update first): 
+Last update (latest update first):
   KHoar 2024-11-30: sample format for future edits
 */
 
@@ -149,7 +149,7 @@ object PGFisher {
     w: BDV[Double],
     M: BDM[Double],
     pType: String = "two",
-    nsimOpt: Option[Int] = None, 
+    nsimOpt: Option[Int] = None,
     seedOpt: Option[Int] = None
   ) : Double = {
       val MChol = try {
@@ -157,7 +157,7 @@ object PGFisher {
       } catch {
         case _: Exception =>
           val nearPDM = nearestPositiveDefinite(M)
-          cholesky(nearPDM) 
+          cholesky(nearPDM)
       }
       val flipped = flipLowerToUpper(MChol)
       val n = M.rows
