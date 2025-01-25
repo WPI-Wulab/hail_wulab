@@ -13,10 +13,14 @@ from hail.expr import (
     StructExpression,
     analyze,
     expr_any,
+    expr_array,
     expr_call,
     expr_float64,
+    expr_int32,
+    expr_int64,
     expr_locus,
     expr_numeric,
+    expr_oneof,
     matrix_table_source,
     raise_unless_column_indexed,
     raise_unless_entry_indexed,
@@ -3118,6 +3122,71 @@ def simple_group_sum(key_expr, x) -> Table:
     )
 
     config = {'name': 'SimpleGroupSum', 'keyField': key_field_name, 'xField': x_field_name}
+    return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
+
+
+@typecheck(
+    key=expr_any,
+    pval=expr_float64,
+    df=expr_int32,
+    w=expr_float64,
+    corr=expr_array(expr_float64),
+    corr_idx=expr_oneof(expr_int32, expr_int64),
+    method=str,
+    one_sided=bool,
+)
+def gfisher(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
+    """Run GFisher Analysis on a dataset
+
+    Args:
+        key (expr_any): row expression to group by.
+        pval (expr_float64): row expression of p-values
+        df (expr_int32): row expression of degrees of freedom
+        w (expr_float64): row expression of weights
+        corr (expr_array): row expression containing rows of the correlation matrix (contains the row of the correlation matrix corresponding to this row's SNP)
+        corr_idx (expr_int32): row expression containing the index this row corresponds to in the original correlation matrix.
+        method (str, optional): which method to use. Either "HYB" (default) for moment ratio matching by quadratic approximation, "MR" for simulation-assisted moment ratio matching, or "GB" for Brown's method with calculated variance.
+        one_sided (bool, optional): whether the input p-values were one-sided or not. Defaults to False.
+
+    Returns:
+        hl.Table: table containing the GFisher statistic and
+
+    Examples:
+    ```python
+    hl.reset_global_randomness()
+    mt = hl.balding_nichols_model(1, n_samples=20, n_variants=50)
+    mt = mt.annotate_rows(gene=mt.locus.position // 5)
+    mt = mt.annotate_entries(X=mt.GT.n_alt_alleles())
+    mt = mt.add_row_index()
+    mt = mt.annotate_rows(weight=1.0,
+                        df=hl.literal(list(range(1, 1 + mt.count_rows())))[hl.int32(mt.row_idx)])
+    mt = mt.annotate_cols(phenotype=hl.agg.sum(mt.GT.n_alt_alleles()) - 20 + hl.rand_norm(0, 1))
+    pval_ht = hl.linear_regression_rows(y=mt.phenotype, x=mt.X, covariates=[1.0])
+    row_cor = hl.row_correlation(mt.X)
+    rce = row_cor.to_table_row_major()
+    mt = mt.annotate_rows(row_cor=rce[mt.row_idx].entries, pval=pval_ht[mt.row_key].p_value)
+    hl.gfisher(mt.gene, mt.pval, mt.df, mt.weight, mt.row_cor, mt.row_idx)
+    ```
+    """
+    mt = matrix_table_source("gfisher", key)
+    mt = mt._select_all(
+        row_exprs={'__key': key, '__pvalue': pval, '__weight': w, '__corr': corr, '__df': df, '__rowIdx': corr_idx}
+    )
+
+    if method not in ["HYB", "MR", "GB"]:
+        raise ValueError(f'gfisher: method must be one of "HYB", "MR", "GB". received value "{method}"')
+
+    config = {
+        'name': 'GFisher',
+        'keyField': '__key',
+        'pField': '__pvalue',
+        'dfField': '__df',
+        'weightField': '__weight',
+        'corrField': '__corr',
+        'rowIDXField': '__rowIdx',
+        'method': method,
+        'oneSided': one_sided,
+    }
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 
 
