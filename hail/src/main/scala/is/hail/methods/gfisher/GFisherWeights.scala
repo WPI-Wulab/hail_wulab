@@ -49,7 +49,7 @@ object GFisherWeights {
     * @param ORD order of Hermite polynomial
     */
   def covM_Integrand(x: Double, g: Double => Double, mu: Double, ORD: Int): Double = {
-    return g(x) * Normal.density(x-mu, 0.0, 1.0, false) * hermite(x - mu, ORD)
+    return g(x) * Normal.density(x-mu, 0.0, 1.0, false) * hermite_scalar(x - mu, ORD)
   }
 
   /**
