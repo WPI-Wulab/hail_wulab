@@ -34,6 +34,7 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
   */
 case class GFisher(
   keyField: String,
+  keyFieldOut: String,
   pField: String,
   dfField: String,
   weightField: String,
@@ -46,11 +47,11 @@ case class GFisher(
   override def typ(childType: MatrixType): TableType = {
     val keyType = childType.rowType.fieldType(keyField)
     val mySchema = TStruct(
-      ("id", keyType),
+      (keyFieldOut, keyType),
       ("stat", TFloat64),
       ("p_value", TFloat64)
     )
-    TableType(mySchema, FastSeq("id"), TStruct.empty)
+    TableType(mySchema, FastSeq(keyFieldOut), TStruct.empty)
   }
   def preservesPartitionCounts: Boolean = false
 

@@ -1045,10 +1045,10 @@ class MatrixToTableApply(TableIR):
             my_type = hl.dtype(f'struct{{id:{key_type},my_sum:float64}}')
             return hl.ttable(hl.tstruct(), my_type, ['id'])
         elif name == "GFisher":
-            key_field = self.config['keyField']
-            key_type = child_typ.row_type[key_field]
-            my_type = hl.dtype(f'struct{{id:{key_type},stat:float64,p_value:float64}}')
-            return hl.ttable(hl.tstruct(), my_type, ['id'])
+            key_field_out = self.config['keyFieldOut']
+            key_type = child_typ.row_type[self.config['keyField']]
+            my_type = hl.dtype(f'struct{{{key_field_out}:{key_type},stat:float64,p_value:float64}}')
+            return hl.ttable(hl.tstruct(), my_type, [key_field_out])
         else:
             assert name == 'LocalLDPrune', name
             return hl.ttable(

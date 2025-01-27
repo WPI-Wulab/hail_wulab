@@ -3169,6 +3169,11 @@ def gfisher(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
     ```
     """
     mt = matrix_table_source("gfisher", key)
+
+    # FIXME: remove this logic when annotation is better optimized (taken from line 3050 of skat function)
+    # used to name group column in the output table to what it was in the input. Logic taken from line 3050 of skat function
+    key_name_out = mt._fields_inverse[key] if key in mt._fields_inverse else "id"
+
     mt = mt._select_all(
         row_exprs={'__key': key, '__pvalue': pval, '__weight': w, '__corr': corr, '__df': df, '__rowIdx': corr_idx}
     )
@@ -3179,6 +3184,7 @@ def gfisher(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
     config = {
         'name': 'GFisher',
         'keyField': '__key',
+        'keyFieldOut': key_name_out,
         'pField': '__pvalue',
         'dfField': '__df',
         'weightField': '__weight',
