@@ -117,17 +117,17 @@ object PGFisher {
     w: BDV[Double],
     M: BDM[Double]
   ): Double = {
-      w := w / sum(w)
-      val GM: BDM[Double] = GFisherGM.getGFisherGM(df, w, M, false)
-      val mu: Double = w dot convert(df, Double)
-      val sigma2: Double = sum(GM)
-      val lam: BDV[Double] = GFisherLambda.getGFisherLambda(df, w, M, GM)
-      val (c2: Double, c3: Double, c4: Double) = (sum(lam ^:^ 2.0), sum(lam ^:^ 3.0), sum(lam ^:^ 4.0))
-      val gm: Double = (math.sqrt(8.0) * c3) / math.pow(c2, 3.0/2.0)
-      val kp: Double = 12.0 * c4 / math.pow(c2, 2.0) + 3.0
-      val a: Double = 9.0 * math.pow(gm, 2.0) / math.pow((kp - 3.0), 2.0)
-      val x: Double = (q - mu) * math.sqrt(a) / math.sqrt(sigma2) + a
-      return Gamma.cumulative(x, a, 1.0, false, false)
+    w := w / sum(w)
+    val GM: BDM[Double] = GFisherGM.getGFisherGM(df, w, M, false)
+    val mu: Double = w dot convert(df, Double)
+    val sigma2: Double = sum(GM)
+    val lam: BDV[Double] = GFisherLambda.getGFisherLambda(df, w, M, GM)
+    val (c2: Double, c3: Double, c4: Double) = (sum(lam ^:^ 2.0), sum(lam ^:^ 3.0), sum(lam ^:^ 4.0))
+    val gm: Double = (math.sqrt(8.0) * c3) / math.pow(c2, 3.0/2.0)
+    val kp: Double = 12.0 * c4 / math.pow(c2, 2.0) + 3.0
+    val a: Double = 9.0 * math.pow(gm, 2.0) / math.pow((kp - 3.0), 2.0)
+    val x: Double = (q - mu) * math.sqrt(a) / math.sqrt(sigma2) + a
+    return Gamma.cumulative(x, a, 1.0, false, false)
   }
 
   /**
