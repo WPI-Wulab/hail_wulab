@@ -11,37 +11,15 @@ package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
 import breeze.numerics._
-import breeze.stats.distributions._
-import net.sourceforge.jdistlib.Gamma
+import breeze.stats.distributions.Gaussian
+import net.sourceforge.jdistlib.{Normal, ChiSquare, Gamma}
+import net.sourceforge.jdistlib.rng.{RandomEngine, MersenneTwister}
 
 object PGFisher {
 
   /*
   Helper functions
   */
-
-  /**
-    * Formatting function for Cholesky matrix calculated in PGFisher 'MR' method
-    *
-    * @param matrix n by n cholesky matrix
-    * @return flipped n by n cholesky matrix
-    */
-  def flipLowerToUpper(matrix: BDM[Double]): BDM[Double] = {
-    val rows = matrix.rows
-    val cols = matrix.cols
-    val flippedMatrix = BDM.zeros[Double](rows, cols)
-    for (i <- 0 until rows) {
-      for (j <- 0 until cols) {
-        if (i == j) {
-          flippedMatrix(i, j) = matrix(i, j)
-        } else {
-          flippedMatrix(i, j) = matrix(j, i)
-          flippedMatrix(j, i) = matrix(i, j)
-        }
-      }
-    }
-    flippedMatrix
-  }
 
   /**
     * Function that properly formats the nsim and seed Option inputs for pGFisher
@@ -57,20 +35,6 @@ object PGFisher {
       case None => None
     }
     (initializedNsim, initializedSeed)
-  }
-
-  /**
-    * Nearest positive definite matrix calculation through eigen decomposition
-    *
-    * @param matrix n by n cholesky matrix
-    * @return n x n NPD matrix
-    */
-  def nearestPositiveDefinite(matrix: BDM[Double]): BDM[Double] = {
-    val symMatrix = (matrix + matrix.t) / 2.0
-    val eigSym.EigSym(eigenvalues, eigenvectors) = eigSym(symMatrix)
-    val positiveEigenvalues = eigenvalues.map(ev => if (ev > 0) ev else 1e-10)
-    val positiveDefiniteMatrix = eigenvectors * diag(positiveEigenvalues) * eigenvectors.t
-    (positiveDefiniteMatrix + positiveDefiniteMatrix.t) / 2.0
   }
 
   /**
@@ -94,7 +58,7 @@ object PGFisher {
     val num = implicitly[Numeric[T]]
     val vectorDoubles = v.map(num.toDouble)
     val vectorMean = mean(v)
-    math.sqrt(sum(vectorDoubles.map(x => math.pow(x - vectorMean, 2))) / v.length)
+    math.sqrt(sum(vectorDoubles.map(x => math.pow(x - vectorMean, 2))) / (v.length - 1))
   }
 
   /*
@@ -137,7 +101,7 @@ object PGFisher {
     * @param df n-dimensional vector of degrees of freedom
     * @param w n-dimensional vector of weights
     * @param M n by n correlation matrix
-    * @param pType "two" = two-sided input p-values, "one" = one-sided input p-values
+    * @param one_sided true = one-sided input p-values, false = two-sided input p-values
     * @param nsimOpt number of simulation used in the "MR" method for pGFisher, default = 5e4
     * @param seedOpt seed for random number generation, default = None
     * @return the p-value of the GFisher test
@@ -148,7 +112,7 @@ object PGFisher {
     df: BDV[Int],
     w: BDV[Double],
     M: BDM[Double],
-    pType: String = "two",
+    one_sided: Boolean = false,
     nsimOpt: Option[Int] = None,
     seedOpt: Option[Int] = None
   ) : Double = {
@@ -156,39 +120,34 @@ object PGFisher {
         cholesky(M)
       } catch {
         case _: Exception =>
-          val nearPDM = nearestPositiveDefinite(M)
+          val nearPDM = nearPD(M)
           cholesky(nearPDM)
       }
-      val flipped = flipLowerToUpper(MChol)
+      val flipped = MChol.t
       val n = M.rows
       val (nsim, seed) = initializeParams(nsimOpt, seedOpt)
       val rand_mat = if (seed != None) {
         val intSeed: Int = seed.getOrElse(0)
-        val rng = RandBasis.withSeed(intSeed)
-        BDM.rand(nsim, n, Gaussian(0.0, 1.0)(rng))
+        val rng: RandomEngine = new MersenneTwister(intSeed)
+        BDM.tabulate(nsim, n)((_, _) => Normal.random(0.0, 1.0, rng))
       } else {
+        // I cannot use jdistlib here because Normal.random requires an rng in order to work properly
         BDM.rand(nsim, n, Gaussian(0.0, 1.0))
       }
       val znull = rand_mat * flipped
-      val pnull = if (pType == "two") {
-        znull.map(z => 2 * Gaussian(0.0, 1.0).cdf(-math.abs(z)))
+      val pnull = if (one_sided) {
+        znull.map(z => Normal.cumulative(z, 0.0, 1.0, true, false))
       } else {
-        znull.map(z => Gaussian(0.0, 1.0).cdf(z))
+        znull.map(z => 2 * Normal.cumulative(-math.abs(z), 0.0, 1.0, true, false))
       }
       val ppTrans = if (stdDev(df) == 0.0) {
         if (df.forall(_ == 2.0)) {
           -2.0 * log(pnull)
         } else {
-          BDM.tabulate(pnull.rows, pnull.cols) { (i, j) =>
-            val chiSq = new ChiSquared(df(0))
-            chiSq.inverseCdf(1 - pnull(i, j))
-          }
+          BDM.tabulate(pnull.rows, pnull.cols) { (i, j) => ChiSquare.quantile(1 - pnull(i, j), df(0), false, false) }
         }
       } else {
-        BDM.tabulate(pnull.rows, pnull.cols) { (i, j) =>
-          val chiSq = new ChiSquared(df(j))
-          chiSq.inverseCdf(1 - pnull(i, j))
-        }
+        BDM.tabulate(pnull.rows, pnull.cols) { (i, j) => ChiSquare.quantile(1 - pnull(i, j), df(j), false, false) }
       }
       val fisherNull = ppTrans(*, ::).map(row => sum(row *:* w))
       val MM = (1 to 4).map(k => mean(fisherNull.map(math.pow(_, k))))
@@ -227,4 +186,34 @@ object PGFisher {
     return Gamma.cumulative(x, a, 1.0, false, false)
   }
 
+  def runTests(): Unit = {
+    println("Running inline tests...")
+
+    val q = 1.5
+    val df = BDV(2, 2, 2)  
+    val df1 = BDV(3, 4, 5)
+    val df2 = BDV(1, 1, 1)
+    val w = BDV(0.5, 0.3, 0.2)
+    val w1 = BDV(0.4, 0.35, 0.25)
+    val M = BDM((1.0, 0.5, 0.6), (0.5, 1.0, 0.3), (0.6, 0.3, 1.0))
+    val M1 = BDM((1.0, 0.924648365, 0.847473283), (0.924648365, 1.0, 0.939247572), (0.847473283, 0.939247572, 1.0))
+    val pType = false
+    val method = "MR"
+
+    val result = pGFisherMR(q, df, w, M1, pType, nsimOpt = Some(50000), seedOpt = Some(12))
+    println("pGFisherHyb result (same dfs (all 2)):")
+    println(result)
+
+    val result2 = pGFisherMR(q, df2, w1, M1, pType, nsimOpt = Some(50000), seedOpt = Some(4))
+    println("pGFisherHyb result (different dfs):")
+    println(result2)
+        
+    println("All tests passed.")
+    }
+
 }
+
+// Run tests when the file is executed
+//object Main extends App {
+//  is.hail.methods.gfisher.PGFisher.runTests()
+//}

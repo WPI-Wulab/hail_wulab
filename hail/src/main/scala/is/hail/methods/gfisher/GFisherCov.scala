@@ -22,13 +22,13 @@ object GFisherCov {
     * @param W2 a vector of weights of freedom for another GFisher statistic.
     * @param M correlation matrix of the input Zscores from which the input p-values were obtained.
     * @param varCorrect default = TRUE to make sure the exact variance was used.
-    * @param pType "two" = two-sided, "one" = one-sided input p-values.
+    * @param one_sided true = one-sided input p-values, false = two-sided input p-values.
     * @return covariance of T(l) and T(r) in Corollary 2
     */
-  def getGFisherCov(D1: BDV[Int], D2: BDV[Int], W1: BDV[Double], W2: BDV[Double], M: BDM[Double], varCorrect: Boolean = true, pType: String = "two"): Double = {
+  def getGFisherCov(D1: BDV[Int], D2: BDV[Int], W1: BDV[Double], W2: BDV[Double], M: BDM[Double], varCorrect: Boolean = true, one_sided: Boolean = false): Double = {
         val (coeff1_res1, coeff2_res1, coeff3_res1, coeff4_res1) = GFisherCoefs.getGFisherCoefs(D1.mapValues(_.toInt))
         val (coeff1_res2, coeff2_res2, coeff3_res2, coeff4_res2) = GFisherCoefs.getGFisherCoefs(D2.mapValues(_.toInt))
-        val GM_cross = if (pType == "two") {
+        val GM_cross = if (!one_sided) {
           val term1 = (M.mapValues(math.pow(_, 2.0)) / 2.0 * (coeff1_res1 * coeff1_res2.t))
           val term2 = (M.mapValues(math.pow(_, 4.0)) / 24.0 * (coeff2_res1 * coeff2_res2.t))
           val term3 = (M.mapValues(math.pow(_, 6.0)) / 720.0 * (coeff3_res1 * coeff3_res2.t))

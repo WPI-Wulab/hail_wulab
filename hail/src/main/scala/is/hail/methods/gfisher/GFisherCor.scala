@@ -20,15 +20,15 @@ object GFisherCor {
     * @param W an mxn matrix of weights, where m is the number of GFisher statistics, n is the number of p-values to be combined by each GFisher.
     * @param M correlation matrix of the input Zscores from which the input p-values were obtained.
     * @param varCorrect passed to getGFishercov(). default = TRUE to make sure the exact variance was used.
-    * @param pType "two" = two-sided, "one" = one-sided input p-values.
+    * @param one_sided true = one-sided input p-values, false = two-sided input p-values.
     * @return a correlation matrix between T(1), T(2),..., T(m) as calculated in Corollary 2.
     */
-  def getGFisherCor(DD: BDM[Int], W: BDM[Double], M: BDM[Double], varCorrect: Boolean = true, pType: String = "two"): BDM[Double] = {
+  def getGFisherCor(DD: BDM[Int], W: BDM[Double], M: BDM[Double], varCorrect: Boolean = true, one_sided: Boolean = false): BDM[Double] = {
     val m = DD.rows
     val COV = BDM.fill[Double](m, m)(Double.NaN)
     for (i <- 0 until m) {
       for (j <- i until m) {
-        COV(i, j) = GFisherCov.getGFisherCov(DD(i, ::).t, DD(j, ::).t, W(i, ::).t, W(j, ::).t, M, varCorrect, pType)
+        COV(i, j) = GFisherCov.getGFisherCov(DD(i, ::).t, DD(j, ::).t, W(i, ::).t, W(j, ::).t, M, varCorrect, one_sided)
       }
     }
     for (i <- 1 until m; j <- 0 until i) {

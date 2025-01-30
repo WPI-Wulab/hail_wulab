@@ -33,7 +33,7 @@ object StatOGFisher {
                 It allows a matrix of one column, indicating the same degrees of freedom for all p-values's chi-square transformations.
     * @param W matrix of non-negative weights. Each row represents a GFisher test.
     * @param M n by n correlation matrix of the input Zscores from which the input p-values were obtained.
-    * @param pType "two" = two-sided input p-values, "one" = one-sided input p-values
+    * @param one_sided true = one-sided input p-values, false = two-sided input p-values
     * @param method "MR" = simulation-assisted moment ratio matching
                     "HYB" = moment ratio matching by quadratic approximation
                     "GB" = Brown's method with calculated variance. See details in the reference
@@ -47,7 +47,7 @@ object StatOGFisher {
         DF: BDM[Int],
         W: BDM[Double],
         M: BDM[Double],
-        pType: String = "two",
+        one_sided: Boolean = false,
         method: String = "HYB",
         nsim: Option[Int] = None,
         seed: Option[Int] = None
