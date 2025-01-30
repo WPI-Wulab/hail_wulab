@@ -186,34 +186,4 @@ object PGFisher {
     return Gamma.cumulative(x, a, 1.0, false, false)
   }
 
-  def runTests(): Unit = {
-    println("Running inline tests...")
-
-    val q = 1.5
-    val df = BDV(2, 2, 2)  
-    val df1 = BDV(3, 4, 5)
-    val df2 = BDV(1, 1, 1)
-    val w = BDV(0.5, 0.3, 0.2)
-    val w1 = BDV(0.4, 0.35, 0.25)
-    val M = BDM((1.0, 0.5, 0.6), (0.5, 1.0, 0.3), (0.6, 0.3, 1.0))
-    val M1 = BDM((1.0, 0.924648365, 0.847473283), (0.924648365, 1.0, 0.939247572), (0.847473283, 0.939247572, 1.0))
-    val pType = false
-    val method = "MR"
-
-    val result = pGFisherMR(q, df, w, M1, pType, nsimOpt = Some(50000), seedOpt = Some(12))
-    println("pGFisherHyb result (same dfs (all 2)):")
-    println(result)
-
-    val result2 = pGFisherMR(q, df2, w1, M1, pType, nsimOpt = Some(50000), seedOpt = Some(4))
-    println("pGFisherHyb result (different dfs):")
-    println(result2)
-        
-    println("All tests passed.")
-    }
-
 }
-
-// Run tests when the file is executed
-//object Main extends App {
-//  is.hail.methods.gfisher.PGFisher.runTests()
-//}
