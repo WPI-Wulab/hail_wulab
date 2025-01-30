@@ -8,7 +8,7 @@ import net.sourceforge.jdistlib.Normal
 
 import org.apache.commons.math3.util.CombinatoricsUtils.factorialDouble
 
-object GFisherWeights {
+object OptimalWeights {
 
 
 
