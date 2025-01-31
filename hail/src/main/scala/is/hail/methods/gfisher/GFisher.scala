@@ -67,3 +67,56 @@ case class GFisher(
     TableValue(ctx, typ(mv.typ).rowType, typ(mv.typ).key, newrdd)
   }
 }
+
+
+/**
+  * Omnibus version of Generalized Fisher's combination testing.
+  *
+  * @author Peter Howell
+  *
+  * @param keyField name of field to group by
+  * @param pField name of field containing p-values
+  * @param dfField name of field containing degrees of freedom
+  * @param weightField name of field containing weights
+  * @param corrField name of field containing correlation arrays
+  * @param rowIDXField name of field containing indices of the rows in the correlation matrix
+  * @param method which method to use. Either HYB, MR, or GB
+  * @param oneSided whether the input p-values are one-sided
+  */
+case class OGFisher(
+  keyField: String,
+  keyFieldOut: String,
+  pField: String,
+  dfField: String,
+  weightField: String,
+  corrField: String,
+  rowIDXField: String,
+  method: String,
+  oneSided: Boolean
+) extends MatrixToTableFunction {
+
+  override def typ(childType: MatrixType): TableType = {
+    val keyType = childType.rowType.fieldType(keyField)
+    val mySchema = TStruct(
+      (keyFieldOut, keyType),
+      ("stat_ind", TFloat64),
+      ("p_value_ind", TFloat64),
+      ("stat", TArray(TFloat64)),
+      ("p_value", TArray(TFloat64))
+    )
+    TableType(mySchema, FastSeq(keyFieldOut), TStruct.empty)
+  }
+  def preservesPartitionCounts: Boolean = false
+
+  def execute(ctx: ExecuteContext, mv: MatrixValue): TableValue = {
+    val groupedRDD = GFisherDataPrep.prepOGFisherRDD(mv, keyField, pField, dfField, weightField, corrField, rowIDXField)
+    val newrdd = groupedRDD.map{case(key, vals) =>
+      val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
+
+      val (_, pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherDataPrep.arrayTupleToVectorTuple2(valArr)
+      val res = PvalOGFisher.pvalOGFisher(pvals, df, w, corrMat, method = method)
+      Row(key, res("stat_ind"), res("pval_ind"), res("stat"), res("pval"))
+    }
+    TableValue(ctx, typ(mv.typ).rowType, typ(mv.typ).key, newrdd)
+  }
+}
