@@ -113,6 +113,7 @@ object GFisherDataPrep {
 
   def prepOGFisherRDD(
     mv: MatrixValue,
+    nTests: Int,
     keyField: String,
     pField: String,
     dfField: String,
@@ -155,7 +156,7 @@ object GFisherDataPrep {
         val rowIdxIsDefined = fullRowType.isFieldDefined(ptr, rowIdxIndex)
 
         if (keyIsDefined && weightIsDefined && pIsDefined && dfIsDefined && rowIdxIsDefined) {
-          val weightsArr = new Array[Double](n)
+          val weightsArr = new Array[Double](nTests)
           var notAllNA = setArrayMeanImputedDoubles(
             weightsArr,
             ptr,
@@ -163,7 +164,7 @@ object GFisherDataPrep {
             weightField
           )
           if (!notAllNA) None
-          val dfArr = new Array[Int](n)
+          val dfArr = new Array[Int](nTests)
           notAllNA = setArrayInt(
             dfArr,
             ptr,

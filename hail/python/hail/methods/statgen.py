@@ -3203,10 +3203,11 @@ def gfisher(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
     w=expr_array(expr_float64),
     corr=expr_array(expr_float64),
     corr_idx=expr_oneof(expr_int32, expr_int64),
+    n_tests=int,
     method=str,
     one_sided=bool,
 )
-def ogfisher(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
+def ogfisher(key, pval, df, w, corr, corr_idx, n_tests, method="HYB", one_sided=False):
     """Run GFisher Analysis on a dataset
 
     Args:
@@ -3254,6 +3255,7 @@ def ogfisher(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
 
     config = {
         'name': 'OGFisher',
+        'nTests': n_tests,
         'keyField': '__key',
         'keyFieldOut': key_name_out,
         'pField': '__pvalue',

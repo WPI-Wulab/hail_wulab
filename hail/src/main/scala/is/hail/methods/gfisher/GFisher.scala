@@ -84,6 +84,7 @@ case class GFisher(
   * @param oneSided whether the input p-values are one-sided
   */
 case class OGFisher(
+  nTests: Int,
   keyField: String,
   keyFieldOut: String,
   pField: String,
@@ -113,7 +114,7 @@ case class OGFisher(
     val newrdd = groupedRDD.map{case(key, vals) =>
       val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
-      val (_, pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherDataPrep.arrayTupleToVectorTuple2(valArr)
+      val (_, pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherDataPrep.arrayTupleToVectorTuple(valArr, nTests)
       val res = PvalOGFisher.pvalOGFisher(pvals, df, w, corrMat, method = method)
       Row(key, res("stat_ind"), res("pval_ind"), res("stat"), res("pval"))
     }
