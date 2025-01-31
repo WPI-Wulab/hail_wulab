@@ -111,6 +111,25 @@ object GFisherDataPrep {
     }.groupByKey()
   }
 
+
+  /**
+    * Collects the required fields and groups by key.
+    *
+    * Take a MatrixTable containing row-indexed p-values, degrees of freedom, weights, correlation arrays, and correlation indexes
+    *
+    * Returns an RDD of (key, Iterable[(rowIdx, pval, df, weight, correlationVector)]).
+    * This means that each group in the MatrixTable will be a single row in the resulting RDD, represented as the tuple containing the key and an iterable of the rows in the group.
+    * The Iterable contains the p-values, degrees of freedom, weights, correlation vectors, and row indices of the rows in the group.
+    *
+    * @param mv the MatrixValue of our hail MatrixTable
+    * @param nTests number of involved tests for each group. This is the number of rows in the DF matrix in R's implementation of OGFisher
+    * @param keyField what we are grouping by
+    * @param pField field the p-values are in
+    * @param dfField field storing degrees of freedom
+    * @param weightField field storing weights
+    * @param corrField field storing correlation
+    * @param rowIdxField field storing the row index
+    */
   def prepOGFisherRDD(
     mv: MatrixValue,
     nTests: Int,
@@ -359,14 +378,14 @@ object GFisherDataPrep {
     *
     * @param a array containing
     */
-  def arrayTupleToVectorTuple2(
-    a: Array[(Int, Double, BDV[Int], BDV[Double], BDV[Double])]
+  def arrayTupleToVectorTuple(
+    a: Array[(Int, Double, BDV[Int], BDV[Double], BDV[Double])],
+    nTests: Int
   ): (BDV[Int], BDV[Double], BDM[Int], BDM[Double], BDM[Double]) = {
     require(a.nonEmpty)
     val c0 = a(0)._5
     require(c0.offset == 0 && c0.stride == 1)
     val m: Int = a.length // number of rows that were put in this group
-    val n: Int = a(0)._3.length
     val rowIdxArr = new Array[Int](m)
     val pvalArr = new Array[Double](m)
 
@@ -380,6 +399,9 @@ object GFisherDataPrep {
     i = 0
     val corrArr = new Array[Double](m*m)
 
+    // important! breeze matrices are column-major, so we need to fill in the matrix by columns.
+    // this makes no difference for correlation matrices, but we do need to be careful for the df and weight matrices
+
     // fill in the correlation matrix
     while (i < m) {
       for (j <- (0 until m)) {
@@ -388,30 +410,36 @@ object GFisherDataPrep {
       i += 1
     }
     i = 0
-
     // fill in the df array and the weight array
-    val nTests = a(0)._3.length
-    val dfArr = new Array[Int](m * n)
+    val dfArr = new Array[Int](m * nTests)
     while (i < m) {
-        if (a(i)._3.length != nTests)
-          fatal(s"Number of tests in each row must be the same, got ${a(i)._3.length} in row $i, expected $nTests")
+      if (a(i)._3.length != nTests)
+        fatal(s"Number of tests in each row must be the same, got ${a(i)._3.length} degrees of freedom in row $i of a group, expected $nTests")
+      // again note that breeze matrices are column-major
       for (j <- (0 until nTests)) {
-        dfArr(i*m+j) = a(i)._3(j)
+        dfArr(i*nTests + j) = a(i)._3(j)
       }
       i += 1
     }
     i = 0
-    val weightArr = new Array[Double](m * n)
+    val weightArr = new Array[Double](m * nTests)
     while (i < m) {
+      if (a(i)._4.length != nTests)
+          fatal(s"Number of tests in each row must be the same, got ${a(i)._3.length} weights in row $i, expected $nTests")
       for (j <- (0 until nTests)) {
-        if (a(i)._4.length != nTests)
-          fatal(s"Number of tests in each row must be the same, got ${a(i)._3.length} in row $i, expected $nTests")
-        weightArr(i*m+j) = a(i)._4(j)
+        // again note that breeze matrices are column-major
+        weightArr(i*nTests + j) = a(i)._4(j)
       }
       i += 1
     }
-    val corrMatrix = new BDM[Double](m, m, corrArr)
-    return (new BDV(rowIdxArr), new BDV(pvalArr), new BDM[Int](m, nTests, dfArr), new BDM[Double](m, nTests, weightArr), new BDM[Double](m, m, corrArr))
+
+    val rowIdx = new BDV(rowIdxArr)
+    val pval = new BDV(pvalArr)
+    // again note that breeze matrices are column-major
+    val df = new BDM[Int](nTests, m, dfArr)
+    val weight = new BDM[Double](nTests, m, weightArr)
+    val corr = new BDM[Double](m, m, corrArr)
+    return (rowIdx, pval, df, weight, corr)
   }
 
 }

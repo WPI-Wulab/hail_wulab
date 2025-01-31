@@ -98,25 +98,37 @@ case class OGFisher(
 
   override def typ(childType: MatrixType): TableType = {
     val keyType = childType.rowType.fieldType(keyField)
+    // val arrayType = childType.rowType.fieldType(weightField)//do this to get the array type
+    // println("arrayType: " + arrayType)
+    // println(arrayType)
     val mySchema = TStruct(
       (keyFieldOut, keyType),
-      ("stat_ind", TFloat64),
-      ("p_value_ind", TFloat64),
-      ("stat", TArray(TFloat64)),
-      ("p_value", TArray(TFloat64))
+      ("stat", TFloat64),
+      ("p_value", TFloat64),
+      ("stat_ind", TArray(TFloat64)),
+      ("p_value_ind",  TArray(TFloat64))
+      // ("stat_ind", arrayType),
+      // ("p_value_ind", arrayType)
     )
     TableType(mySchema, FastSeq(keyFieldOut), TStruct.empty)
   }
   def preservesPartitionCounts: Boolean = false
 
   def execute(ctx: ExecuteContext, mv: MatrixValue): TableValue = {
-    val groupedRDD = GFisherDataPrep.prepOGFisherRDD(mv, keyField, pField, dfField, weightField, corrField, rowIDXField)
+    val groupedRDD = GFisherDataPrep.prepOGFisherRDD(mv, nTests, keyField, pField, dfField, weightField, corrField, rowIDXField)
     val newrdd = groupedRDD.map{case(key, vals) =>
       val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
       val (_, pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherDataPrep.arrayTupleToVectorTuple(valArr, nTests)
       val res = PvalOGFisher.pvalOGFisher(pvals, df, w, corrMat, method = method)
-      Row(key, res("stat_ind"), res("pval_ind"), res("stat"), res("pval"))
+      Row(key,
+        res("stat"),
+        res("pval"),
+        res("stat_indi").asInstanceOf[BDV[Double]].toArray.toFastSeq,
+        res("pval_indi").asInstanceOf[BDV[Double]].toArray.toFastSeq
+        // res("stat_indi"),
+        // res("pval_indi")
+      )
     }
     TableValue(ctx, typ(mv.typ).rowType, typ(mv.typ).key, newrdd)
   }
