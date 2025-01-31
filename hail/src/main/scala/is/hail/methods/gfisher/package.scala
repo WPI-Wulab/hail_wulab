@@ -43,7 +43,7 @@ package object gfisher {
     return degree match {
       case 1 => x
       case 2 => x*x - 1.0
-      case 3 => math.pow(x, 3.0) - 3.0 * x
+      case 3 => math.pow(x, 3.0) - 3.0   * x
       case 4 => math.pow(x, 4.0) - 6.0   * math.pow(x, 2.0) + 3.0
       case 5 => math.pow(x, 5.0) - 10.0  * math.pow(x, 3.0) + 15.0  * x
       case 6 => math.pow(x, 6.0) - 15.0  * math.pow(x, 4.0) + 45.0  * math.pow(x, 2.0) - 15.0
@@ -52,45 +52,6 @@ package object gfisher {
     }
   }
 
-  /**
-    * Convert an array of vectors to a matrix. Column major order.
-    *
-    * @param a array containing
-    */
-  def tupleArrayToVectorTuple(
-    a: Array[(Int, Double, Int, Double, BDV[Double])]
-  ): (BDV[Int], BDV[Double], BDV[Int], BDV[Double], BDM[Double]) = {
-    require(a.nonEmpty)
-    val c0 = a(0)._5
-    require(c0.offset == 0 && c0.stride == 1)
-    val m: Int = a.length // number of rows that were put in this group
-
-    val rowIdxArr = new Array[Int](m)
-    val pvalArr = new Array[Double](m)
-    val weightArr = new Array[Double](m)
-    val dfArr = new Array[Int](m)
-    // val corrArr = new Array[Double](m*n)
-
-    var i = 0
-    while (i < m) {
-      rowIdxArr(i) = a(i)._1
-      pvalArr(i) = a(i)._2
-      dfArr(i) = a(i)._3
-      weightArr(i) = a(i)._4
-      // System.arraycopy(a(i)._5.data, 0, corrArr, i*n, n)
-      i += 1
-    }
-    i = 0
-    val corrArr = new Array[Double](m*m)
-    while (i < m) {
-      for (j <- (0 until m)) {
-        corrArr(i*m+j) = a(i)._5(rowIdxArr(j))
-      }
-      i += 1
-    }
-    val corrMatrix = new BDM[Double](m, m, corrArr)
-    return (BDV(rowIdxArr), BDV(pvalArr), BDV(dfArr), BDV(weightArr), corrMatrix)
-  }
 
   /**
     * Code to convert a covariance matrix to a correlation matrix. Should mimic R's function.
@@ -169,6 +130,19 @@ package object gfisher {
     }
     diag(X) := 1.0
     return X
+  }
+
+
+  def tabulateSymmetric(n: Int)(f: (Int, Int) => Double): BDM[Double] = {
+    val a = new Array[Double](n*n)
+    for (i <- 0 until n) {
+      for (j <- i until n) {
+        val v = f(i, j)
+        a(i*n+j) = v
+        a(j*n+i) = v
+      }
+    }
+    new BDM(n, n, a)
   }
 
 
