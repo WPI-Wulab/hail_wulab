@@ -63,6 +63,7 @@ from .statgen import (
     linear_mixed_regression_rows,
     linear_regression_rows,
     logistic_regression_rows,
+    ogfisher,
     pca,
     poisson_regression_rows,
     realized_relationship_matrix,
@@ -76,6 +77,7 @@ from .statgen import (
 __all__ = [
     'trio_matrix',
     'gfisher',
+    'ogfisher',
     'linear_mixed_model',
     'skat',
     'simple_group_sum',
