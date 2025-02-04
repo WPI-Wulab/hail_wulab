@@ -3196,6 +3196,79 @@ def gfisher(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 
 
+@typecheck(
+    key=expr_any,
+    pval=expr_float64,
+    df=expr_array(expr_int32),
+    w=expr_array(expr_float64),
+    corr=expr_array(expr_float64),
+    corr_idx=expr_oneof(expr_int32, expr_int64),
+    n_tests=int,
+    method=str,
+    one_sided=bool,
+)
+def ogfisher(key, pval, df, w, corr, corr_idx, n_tests, method="HYB", one_sided=False):
+    """Run GFisher Analysis on a dataset
+
+    Args:
+        key (expr_any): row expression to group by.
+        pval (expr_float64): row expression of p-values
+        df (expr_array(expr_int32)): row expression of degrees of freedom. Each element of the array corresponds to a GFisher test
+        w (expr_array(expr_float64)): row expression of weights. Each element of the array corresponds to a GFisher test
+        corr (expr_array): row expression containing rows of the correlation matrix (contains the row of the correlation matrix corresponding to this row's SNP)
+        corr_idx (expr_int32): row expression containing the index this row corresponds to in the original correlation matrix.
+        method (str, optional): which method to use. Either "HYB" (default) for moment ratio matching by quadratic approximation, "MR" for simulation-assisted moment ratio matching, or "GB" for Brown's method with calculated variance.
+        one_sided (bool, optional): whether the input p-values were one-sided or not. Defaults to False.
+
+    Returns:
+        hl.Table: table containing the GFisher statistic and
+
+    Examples:
+    ```python
+    hl.reset_global_randomness()
+    mt = hl.balding_nichols_model(1, n_samples=20, n_variants=50)
+    mt = mt.annotate_rows(gene=mt.locus.position // 5)
+    mt = mt.annotate_entries(X=mt.GT.n_alt_alleles())
+    mt = mt.add_row_index()
+    mt = mt.annotate_rows(weight=1.0,
+                        df=hl.literal(list(range(1, 1 + mt.count_rows())))[hl.int32(mt.row_idx)])
+    mt = mt.annotate_cols(phenotype=hl.agg.sum(mt.GT.n_alt_alleles()) - 20 + hl.rand_norm(0, 1))
+    pval_ht = hl.linear_regression_rows(y=mt.phenotype, x=mt.X, covariates=[1.0])
+    row_cor = hl.row_correlation(mt.X)
+    rce = row_cor.to_table_row_major()
+    mt = mt.annotate_rows(row_cor=rce[mt.row_idx].entries, pval=pval_ht[mt.row_key].p_value)
+    hl.gfisher(mt.gene, mt.pval, mt.df, mt.weight, mt.row_cor, mt.row_idx)
+    ```
+    """
+    mt = matrix_table_source("ogfisher", key)
+
+    # FIXME: remove this logic when annotation is better optimized (taken from line 3050 of skat function)
+    # used to name group column in the output table to what it was in the input. Logic taken from line 3050 of skat function
+    key_name_out = mt._fields_inverse[key] if key in mt._fields_inverse else "id"
+
+    mt = mt._select_all(
+        row_exprs={'__key': key, '__pvalue': pval, '__weight': w, '__corr': corr, '__df': df, '__rowIdx': corr_idx}
+    )
+
+    if method not in ["HYB", "MR", "GB"]:
+        raise ValueError(f'gfisher: method must be one of "HYB", "MR", "GB". received value "{method}"')
+
+    config = {
+        'name': 'OGFisher',
+        'nTests': n_tests,
+        'keyField': '__key',
+        'keyFieldOut': key_name_out,
+        'pField': '__pvalue',
+        'dfField': '__df',
+        'weightField': '__weight',
+        'corrField': '__corr',
+        'rowIDXField': '__rowIdx',
+        'method': method,
+        'oneSided': one_sided,
+    }
+    return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
+
+
 @typecheck(p_value=expr_numeric, approximate=bool)
 def lambda_gc(p_value, approximate=True):
     """
