@@ -207,12 +207,12 @@ object OptimalWeights {
 
   def getH_Binary(X: BDM[Double], y: BDV[Double]): (BDM[Double], BDV[Double], BDV[Double]) = {
     val y0 = log_reg(X, y)
-    val res = y - y0
+    val resids = y - y0
 
     val XTilde = sqrt(y0 *:* (1.0-y0)) *:* X(::,*)
     val HHalf = XTilde * cholesky(inv(XTilde.t * XTilde))
 
-    return((HHalf, y0, res))
+    return((HHalf, y0, resids))
   }
 
 
