@@ -1,10 +1,10 @@
 /*
 This file contains main and supportive functions for computing Z-scores from a matrix of genotypes, covariates,
 and a binary response
-Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value 
+Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
 Creators: Kylie Hoar
-Last update (latest update first): 
+Last update (latest update first):
   KHoar 2025-01-16: sample format for future edits
 */
 
@@ -26,49 +26,18 @@ object FuncCalcuZScores {
   Helper functions
   */
 
-  /**
-   * Train the logistic regression model using gradient descent and predict probabilities for the given feature matrix.
-   * @param X Input feature matrix (rows: observations, cols: features).
-   * @param y Target vector (binary labels: 0 or 1).
-   * @return 
-   */
-  def log_reg(X: BDM[Double], y: BDV[Double]): BDV[Double] = {
-    // Add intercept term by appending a column of ones to X
-    val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
-
-    // Define the negative log-likelihood function and its gradient
-    val logisticLoss = new DiffFunction[BDV[Double]] {
-      def calculate(beta: BDV[Double]): (Double, BDV[Double]) = {
-        val preds = sigmoid(XWithIntercept * beta) // Predicted probabilities
-        val logLikelihood = (y dot breeze.numerics.log(preds)) + 
-          ((1.0 - y) dot breeze.numerics.log(1.0 - preds))
-        val gradient = XWithIntercept.t * (preds - y) // Gradient of the loss function
-        (-logLikelihood, gradient) // Return negative log-likelihood and gradient
-      }
-    }
-
-    // Initialize coefficients (including intercept)
-    val initialCoefficients = BDV.zeros[Double](XWithIntercept.cols)
-
-    // Minimize the negative log-likelihood to find the best coefficients
-    // val optimizer = new LBFGS[BDV[Double]](maxIter = 1000, tolerance = 1e-10)
-    val coefficients = minimize(logisticLoss, initialCoefficients)
-
-    // Predict probabilities for the given feature matrix
-    sigmoid(XWithIntercept * coefficients)
-  }
 
   /**
    * Calculate the Z score by the marginal t statistics for Y vs. each column of G and X
    * @param g Extracted column (BDV) of genotype matrix
-   * @param X Input feature matrix (rows: observations, cols: features).
+   * @param X Input feature matrix (rows: observations, cols: features) with first column of ones for intercept
    * @param Y Target vector (binary labels: 0 or 1).
    */
   def contZScore (g: BDV[Double], X: BDM[Double], Y: BDV[Double]): Double = {
     // Combine column of g with X
     val XwithG = BDM.horzcat(X, g.toDenseMatrix.t)
     // Fit linear model to find initialCoefficients
-    val beta = inv(XwithG.t * XwithG) * XwithG.t * Y 
+    val beta = lin_solve(XwithG, y, false, "qr")
     // Compute predictions
     val Y_hat = XwithG * beta
     // Compute residuals
@@ -98,9 +67,9 @@ object FuncCalcuZScores {
    * @return s0 the estimated dispersion parameter. Binary trait: s0=1. Continuous trait: residual SD under the null model.
    */
   def getZMargScore(
-      G: BDM[Double], 
-      X: BDM[Double], 
-      Y: BDV[Double], 
+      G: BDM[Double],
+      X: BDM[Double],
+      Y: BDV[Double],
       trait_lm: String = "binary",
       use_lm_t: Boolean = false
   ): Map[String, Any] = {
@@ -109,7 +78,7 @@ object FuncCalcuZScores {
 
       case "binary" =>
         // Logistic regression to compute fitted values
-        val Y0 = log_reg(X, Y)
+        val Y0 = log_reg_predict(X, Y)
 
         val sqrtY0 = sqrt(Y0 *:* (1.0 - Y0))
         val Xtilde = ((X(::, *) * sqrtY0).t).t
@@ -135,12 +104,7 @@ object FuncCalcuZScores {
         val GHalf = G.t * Hhalf
         val GHG = G.t * G - GHalf * GHalf.t
 
-        // Fitting a Gaussian Model
-        val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
-        // Compute beta coefficients
-        val beta = inv(XWithIntercept.t * XWithIntercept) * (XWithIntercept.t * Y)
-        // Compute predictions
-        val Y_hat = XWithIntercept * beta
+        val Y_hat = lin_reg_predict(X, Y, true, "direct")
         // Compute residuals
         val res = Y - Y_hat
         // estimate of the sd of error based on the null model
@@ -153,7 +117,7 @@ object FuncCalcuZScores {
             // Z scores based on the score statistics
             score /:/ sqrt(diag(GHG))
         }
-        
+
         Map(
           "Zscores" -> Zscore,
           "scores" -> score,
@@ -161,7 +125,7 @@ object FuncCalcuZScores {
           "M_s" -> GHG,
           "s0" -> s0
         )
-        
+
       case _ =>
         throw new IllegalArgumentException(s"Unknown trait type: $trait_lm")
     }
