@@ -69,6 +69,10 @@ package object gfisher {
   /**
     * fit coefficients for a logistic regression model
     *
+    * Created by Kylie Hoar
+    *
+    * Modified by Peter Howell, 06 Feb 2025
+    *
     * @param X feature matrix
     * @param y response variable
     * @param addIntercept
