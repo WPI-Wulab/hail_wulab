@@ -4,12 +4,114 @@ import is.hail.stats.eigSymD
 import is.hail.utils.fatal
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
-import breeze.numerics.{abs, sqrt}
-
+import breeze.numerics.{abs, sqrt, sigmoid}
+import breeze.optimize.{DiffFunction, minimize}
 import net.sourceforge.jdistlib.{ChiSquare, Normal}
 
 
 package object gfisher {
+
+  def mean(x: BDV[Double]): Double = sum(x) / x.size
+
+  /**
+    * Uses method described in the _linear_skat function in statgen.py to directly compute the predicted values of the best fit model y = Xb
+    *
+    * @param x
+    * @param y
+    * @param addIntercept whether to add a column of ones to x.
+    * @param method method to solve the equation. "direct" bypasses the coefficient and goes directly to the best-predicted value using the reduced QR decomposition. "qr" uses the method that Skat.scala uses to calculate beta which uses breeze's solve after using QR.
+    * "breeze" simply does `X \ y`. "naive" uses the closed form equation for OLS, `inv(X.t * X) * X.t * y`
+    *
+    */
+  def lin_reg_predict(x: BDM[Double], y: BDV[Double], addIntercept: Boolean = true, method:String = "direct"): BDV[Double] = {
+    val X = if (addIntercept) {
+      BDM.horzcat(BDM.ones[Double](x.rows, 1), x)
+    } else {
+      x
+    }
+    if (method == "direct") {
+      val QR = qr.reduced(X)
+      val q = QR.q
+      return q * q.t * y
+    }
+    val beta = lin_solve(X, y, method, false)
+    return X * beta
+  }
+
+  /**
+    * wrapper for solving linear equation Xb = y for b. returns the solution. Like `np.solve(X, y)` with numpy, or `X \ y` in matlab, or `solve(X, y)` in R
+    *
+    * @param X matrix
+    * @param y vector
+    * @param method how to compute it either qr, breeze, or naive.
+    * `qr` uses the method that Skat.scala uses, which still uses breeze's solve.
+    * `breeze` simply does `X \ y`.
+    * `naive` uses the closed form equation for OLS, `inv(X.t * X) * X.t * y`
+    */
+  def lin_solve(x: BDM[Double], y: BDV[Double], method: String = "qr", addIntercept: Boolean = false): BDV[Double] = {
+    val X = if (addIntercept) {
+      BDM.horzcat(BDM.ones[Double](x.rows, 1), x)
+    } else {
+      x
+    }
+    method match {
+      case "qr" =>
+        val QR = qr.reduced(x)
+        val Qt = QR.q.t
+        val R = QR.r
+        R \ (Qt * y)
+      case "breeze" => X \ y
+      case "naive" => inv(X.t * X) * X.t * y
+      case _ => throw new IllegalArgumentException(s"unknown method: $method")
+    }
+  }
+
+  /**
+    * fit coefficients for a logistic regression model
+    *
+    * @param X feature matrix
+    * @param y response variable
+    * @param addIntercept
+    * @return the fitted coefficients
+    */
+  def log_reg_fit(X: BDM[Double], y: BDV[Double], addIntercept: Boolean=false): BDV[Double] = {
+    // Add intercept term by appending a column of ones to X
+    val XWithIntercept = if (addIntercept) {
+      BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+    } else X
+
+    // Define the negative log-likelihood function and its gradient
+    val logisticLoss = new DiffFunction[BDV[Double]] {
+      def calculate(beta: BDV[Double]): (Double, BDV[Double]) = {
+        val preds = sigmoid(XWithIntercept * beta) // Predicted probabilities
+        val logLikelihood = (y dot breeze.numerics.log(preds)) +
+          ((1.0 - y) dot breeze.numerics.log(1.0 - preds))
+        val gradient = XWithIntercept.t * (preds - y) // Gradient of the loss function
+        (-logLikelihood, gradient) // Return negative log-likelihood and gradient
+      }
+    }
+
+    // Initialize coefficients (including intercept)
+    val initialCoefficients = BDV.zeros[Double](XWithIntercept.cols)
+
+    // Minimize the negative log-likelihood to find the best coefficients
+    // val optimizer = new LBFGS[BDV[Double]](maxIter = 1000, tolerance = 1e-10)
+    val coefficients = minimize(logisticLoss, initialCoefficients)
+    return coefficients
+  }
+
+  /**
+    * Train the logistic regression model using gradient descent and predict probabilities for the given feature matrix.
+    * @param X Input feature matrix (rows: observations, cols: features).
+    * @param y Target vector (binary labels: 0 or 1).
+    * @return predicted probabilities from fitted model
+    */
+  def log_reg_predict(X: BDM[Double], y: BDV[Double]): BDV[Double] = {
+    val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+    val coefficients = log_reg_fit(X, y, false)
+    // Predict probabilities for the given feature matrix
+    return sigmoid(XWithIntercept * coefficients)
+  }
 
   /**
     * GFisher transformation function 'g' for two sided p-values
