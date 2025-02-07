@@ -22,19 +22,19 @@ object OptimalWeights {
     binary: Boolean = false,
     forcePositiveWeights: Boolean=true
   ): BDV[Double] = {
-    val (bStar, GHG) = if (binary) {
+    val (bStar, gHG) = if (binary) {
       val (hH, y0, _) = getH_Binary(X, y)
       val GTilde = sqrt(y0 *:* (1.0 - y0)) *:* G(::, *)
       val GHalf = GTilde.t * hH
       val GHG = GTilde.t * GTilde - GHalf * GHalf.t
-      (sqrt(diag(gHG)) *:* b, GHG)
+      (sqrt(diag(GHG)) *:* b, GHG)
     } else {
       val (hH, s0, _) = getH_Continuous(X, y)
       val GHalf = G.t * hH
       val GHG = G.t * G - GHalf * GHalf.t
-      ((sqrt(diag(GHG)) :*: b) /:/ s0, GHG)
+      ((sqrt(diag(GHG)) *:* b) /:/ s0, GHG)
     }
-    val M = cov2cor(GHG)
+    val M = cov2cor(gHG)
     return optimalWeightsM(g, bStar, pi, M, burden, forcePositiveWeights)
   }
 
@@ -56,12 +56,12 @@ object OptimalWeights {
     burden: Boolean,
     forcePositiveWeights: Boolean=true
   ): BDV[Double] = {
-    val n = mu.length
+    val n = bStar.length
     val mu: BDV[Double] = bStar *:* pi  // mean of theta (random effects)
     val mmu: BDV[Double] = M * mu // mean of marginal Z-scores when effects are random
     val v: BDV[Double] = (bStar ^:^ 2.0) *:* pi *:* (1.0 - pi) // variance of theta (random effects)
     // I think (`diag(v) * M` is equal to `v *:* M(::, *)`, and I believe the former is faster)
-    val MVM: BDV[Double] = (v *:* M(::, *)).t * M // faster way to compute M'VM, when V is a diagonal matrix. M+MVM is the variance matrix of marginal Z-scores when effects are random
+    val MVM: BDM[Double] = (v *:* M(::, *)).t * M // faster way to compute M'VM, when V is a diagonal matrix. M+MVM is the variance matrix of marginal Z-scores when effects are random
 
     // I couldn't find a way to check if two functions are identical in scala, so I just added another argument to do the liptak/burden test
     if (burden) {
@@ -81,7 +81,7 @@ object OptimalWeights {
 
     // Sparse approximation
 
-    val r = getR(g, bSstar, pi)
+    val r = getR(g, bStar, pi)
     // Bahadur efficiency
     val sigmaBE = getSigma(g, bStar, pi, M, h1 = false)
     val wts_BE_sparse = getWts(sigmaBE, r, forcePositiveWeights)
@@ -100,7 +100,6 @@ object OptimalWeights {
   ): BDV[Double] = {
     val n = bStar.size
     val mu: BDV[Double] = bStar *:* pi  // mean of theta (random effects)
-    val mmu: BDV[Double] = M * mu // mean of marginal Z-scores when effects are random
     val v: BDV[Double] = (bStar ^:^ 2.0) *:* pi *:* (1.0 - pi) // variance of theta (random effects)
     // I think (`diag(v) * M` is equal to `v *:* M(::, *)`, and I believe the latter is slightly faster)
 
@@ -302,7 +301,7 @@ object OptimalWeights {
     // val beta = lin_solve(XIntercept, y)
     // val yPred = (XIntercept * beta)
 
-    val yPred = lin_reg_predict(X, y, addIntercept=True, method="direct")
+    val yPred = lin_reg_predict(X, y, addIntercept=true, method="direct")
     val resids = y - yPred
 
     val sd = sqrt(sum((resids - mean(resids)) ^:^ 2.0) / (n - 1.0))
@@ -311,7 +310,7 @@ object OptimalWeights {
   }
 
   def getH_Binary(X: BDM[Double], y: BDV[Double]): (BDM[Double], BDV[Double], BDV[Double]) = {
-    val y0 = log_reg(X, y)
+    val y0 = log_reg_predict(X, y)
     val resids = y - y0
 
     val XTilde = sqrt(y0 *:* (1.0-y0)) *:* X(::,*)

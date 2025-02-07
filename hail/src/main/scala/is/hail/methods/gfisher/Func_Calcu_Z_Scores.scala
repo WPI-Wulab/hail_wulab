@@ -37,7 +37,7 @@ object FuncCalcuZScores {
     // Combine column of g with X
     val XwithG = BDM.horzcat(X, g.toDenseMatrix.t)
     // Fit linear model to find initialCoefficients
-    val beta = lin_solve(XwithG, y, false, "qr")
+    val beta = lin_solve(XwithG, Y, method = "qr", addIntercept=false)
     // Compute predictions
     val Y_hat = XwithG * beta
     // Compute residuals
@@ -103,8 +103,8 @@ object FuncCalcuZScores {
         val Hhalf = X * (cholesky(inv(X.t * X)))
         val GHalf = G.t * Hhalf
         val GHG = G.t * G - GHalf * GHalf.t
-
-        val Y_hat = lin_reg_predict(X, Y, true, "direct")
+        val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+        val Y_hat = lin_reg_predict(XWithIntercept, Y, addIntercept=false, method="direct")
         // Compute residuals
         val res = Y - Y_hat
         // estimate of the sd of error based on the null model
