@@ -53,11 +53,11 @@ case class GFisher(
   def preservesPartitionCounts: Boolean = false
 
   def execute(ctx: ExecuteContext, mv: MatrixValue): TableValue = {
-    val groupedRDD = GFisherDataPrep.prepGFisherRDD(mv, keyField, pField, dfField, weightField, corrField, rowIDXField)
+    val groupedRDD = GFisherDataPrep.prepGFisherCorrRDD(mv, keyField, pField, dfField, weightField, corrField, rowIDXField)
     val newrdd = groupedRDD.map{case(key, vals) =>
       val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
-      val (_, pvals: BDV[Double], df: BDV[Int], w: BDV[Double], corrMat: BDM[Double]) = GFisherDataPrep.arrayTupleToVectorTuple(valArr)
+      val (pvals: BDV[Double], df: BDV[Int], w: BDV[Double], corrMat: BDM[Double]) = GFisherDataPrep.gFisherTupsCorrToVectors(valArr)
       val gFishStat: Double = StatGFisher.statGFisher(pvals, df, w)
       val gFishPVal: Double = if (method == "HYB") PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
                               else if (method == "MR") PGFisher.pGFisherMR(gFishStat, df, w, corrMat)
@@ -115,11 +115,11 @@ case class OGFisher(
   def preservesPartitionCounts: Boolean = false
 
   def execute(ctx: ExecuteContext, mv: MatrixValue): TableValue = {
-    val groupedRDD = GFisherDataPrep.prepOGFisherRDD(mv, nTests, keyField, pField, dfField, weightField, corrField, rowIDXField)
+    val groupedRDD = GFisherDataPrep.prepOGFisherCorrRDD(mv, nTests, keyField, pField, dfField, weightField, corrField, rowIDXField)
     val newrdd = groupedRDD.map{case(key, vals) =>
       val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
-      val (_, pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherDataPrep.arrayTupleToVectorTuple(valArr, nTests)
+      val (pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherDataPrep.oGFisherTupsCorrToVectors(valArr, nTests)
       val res = PvalOGFisher.pvalOGFisher(pvals, df, w, corrMat, method = method)
       Row(key,
         res("stat"),

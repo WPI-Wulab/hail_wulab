@@ -16,6 +16,14 @@ import org.apache.spark.rdd.RDD
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 
+case class GFisherTupleCorr(rowIdx: Int, pval: Double, df: Int, weight: Double, corrArr: Array[Double])
+
+case class GFisherTupleGeno(pval: Double, df: Int, weight: Double, genoArr: Array[Double])
+
+case class OGFisherTupleCorr(rowIdx: Int, pval: Double, df: Array[Int], weight: Array[Double], corrArr: Array[Double])
+
+case class OGFisherTupleGeno(pval: Double, df: Array[Int], weight: Array[Double], genoArr: Array[Double])
+
 object GFisherDataPrep {
 
 
@@ -37,7 +45,7 @@ object GFisherDataPrep {
     * @param corrField field storing correlation
     * @param rowIdxField field storing the row index
     */
-  def prepGFisherRDD(
+  def prepGFisherCorrRDD(
     mv: MatrixValue,
     keyField: String,
     pField: String,
@@ -45,7 +53,7 @@ object GFisherDataPrep {
     weightField: String,
     corrField: String,
     rowIdxField: String
-  ): RDD[(Annotation, Iterable[(Int, Double, Int, Double, BDV[Double])])] = {
+  ): RDD[(Annotation, Iterable[GFisherTupleCorr])] = {
 
     val fullRowType = mv.rvRowPType //PStruct
 
@@ -103,7 +111,7 @@ object GFisherDataPrep {
           )
           if (notAllNA){
             corrArr(rowIdx) = 1.0
-            Some((key, (rowIdx, pval, df, weight, BDV(corrArr))))
+            Some((key, GFisherTupleCorr(rowIdx, pval, df, weight, corrArr)))
           } else None
 
         } else None
@@ -130,7 +138,7 @@ object GFisherDataPrep {
     * @param corrField field storing correlation
     * @param rowIdxField field storing the row index
     */
-  def prepOGFisherRDD(
+  def prepOGFisherCorrRDD(
     mv: MatrixValue,
     nTests: Int,
     keyField: String,
@@ -139,7 +147,7 @@ object GFisherDataPrep {
     weightField: String,
     corrField: String,
     rowIdxField: String
-  ): RDD[(Annotation, Iterable[(Int, Double, BDV[Int], BDV[Double], BDV[Double])])] = {
+  ): RDD[(Annotation, Iterable[OGFisherTupleCorr])] = {
 
     val fullRowType = mv.rvRowPType //PStruct
 
@@ -211,7 +219,7 @@ object GFisherDataPrep {
           )
           if (notAllNA){
             corrArr(rowIdx) = 1.0
-            Some((key, (rowIdx, pval, BDV(dfArr), BDV(weightsArr), BDV(corrArr))))
+            Some((key, OGFisherTupleCorr(rowIdx, pval, dfArr, weightsArr, corrArr)))
           } else None
 
         } else None
@@ -333,15 +341,14 @@ object GFisherDataPrep {
   /**
     * Used to convert the iterable of rows in a group to a set of vectors and a matrix.
     *
-    * @param a array containing
+    * @param tups array containing
     */
-  def arrayTupleToVectorTuple(
-    a: Array[(Int, Double, Int, Double, BDV[Double])]
-  ): (BDV[Int], BDV[Double], BDV[Int], BDV[Double], BDM[Double]) = {
-    require(a.nonEmpty)
-    val c0 = a(0)._5
-    require(c0.offset == 0 && c0.stride == 1)
-    val m: Int = a.length // number of rows that were put in this group
+  def gFisherTupsCorrToVectors(
+    tups: Array[GFisherTupleCorr]
+  ): (BDV[Double], BDV[Int], BDV[Double], BDM[Double]) = {
+    require(tups.nonEmpty)
+    // require(c0.offset == 0 && c0.stride == 1)
+    val m: Int = tups.length // number of rows that were put in this group
 
     val rowIdxArr = new Array[Int](m)
     val pvalArr = new Array[Double](m)
@@ -351,11 +358,11 @@ object GFisherDataPrep {
 
     var i = 0
     while (i < m) {
-      rowIdxArr(i) = a(i)._1
-      pvalArr(i) = a(i)._2
-      dfArr(i) = a(i)._3
-      weightArr(i) = a(i)._4
-      // System.arraycopy(a(i)._5.data, 0, corrArr, i*n, n)
+      rowIdxArr(i) = tups(i).rowIdx
+      pvalArr(i) = tups(i).pval
+      dfArr(i) = tups(i).df
+      weightArr(i) = tups(i).weight
+      // System.arraycopy(tups(i)._5.data, 0, corrArr, i*n, n)
       i += 1
     }
     i = 0
@@ -363,37 +370,37 @@ object GFisherDataPrep {
     // fill in the correlation matrix
     while (i < m) {
       for (j <- (0 until m)) {
-        corrArr(i*m+j) = a(i)._5(rowIdxArr(j))
+        corrArr(i*m+j) = tups(i).corrArr(rowIdxArr(j))
       }
       i += 1
     }
     val corrMatrix = new BDM[Double](m, m, corrArr)
-    return (BDV(rowIdxArr), BDV(pvalArr), BDV(dfArr), BDV(weightArr), corrMatrix)
+    return (BDV(pvalArr), BDV(dfArr), BDV(weightArr), corrMatrix)
   }
 
 
 
-/**
+  /**
     * Used to convert the iterable of rows in a group to a set of vectors and matrices for OGFisher.
     *
-    * @param a array containing
+    * @param tups array containing
     */
-  def arrayTupleToVectorTuple(
-    a: Array[(Int, Double, BDV[Int], BDV[Double], BDV[Double])],
+  def oGFisherTupsCorrToVectors(
+    tups: Array[OGFisherTupleCorr],
     nTests: Int
-  ): (BDV[Int], BDV[Double], BDM[Int], BDM[Double], BDM[Double]) = {
-    require(a.nonEmpty)
-    val c0 = a(0)._5
-    require(c0.offset == 0 && c0.stride == 1)
-    val m: Int = a.length // number of rows that were put in this group
+  ): (BDV[Double], BDM[Int], BDM[Double], BDM[Double]) = {
+    require(tups.nonEmpty)
+    val c0 = tups(0).corrArr
+    // require(c0.offset == 0 && c0.stride == 1)
+    val m: Int = tups.length // number of rows that were put in this group
     val rowIdxArr = new Array[Int](m)
     val pvalArr = new Array[Double](m)
 
     var i = 0
     while (i < m) {
-      rowIdxArr(i) = a(i)._1
-      pvalArr(i) = a(i)._2
-      // System.arraycopy(a(i)._5.data, 0, corrArr, i*n, n)
+      rowIdxArr(i) = tups(i).rowIdx
+      pvalArr(i) = tups(i).pval
+      // System.arraycopy(tups(i)._5.data, 0, corrArr, i*n, n)
       i += 1
     }
     i = 0
@@ -405,7 +412,7 @@ object GFisherDataPrep {
     // fill in the correlation matrix
     while (i < m) {
       for (j <- (0 until m)) {
-        corrArr(i*m+j) = a(i)._5(rowIdxArr(j))
+        corrArr(i*m+j) = tups(i).corrArr(rowIdxArr(j))
       }
       i += 1
     }
