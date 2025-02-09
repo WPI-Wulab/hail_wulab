@@ -515,6 +515,11 @@ object GFisherDataPrep {
     while (i < m) {
       rowIdxArr(i) = tups(i).rowIdx
       pvalArr(i) = tups(i).pval
+      if (tups(i).weight.length != nTests || tups(i).df.length != nTests)
+        fatal(s"Number of tests in each row must be the same. Either weights or degrees of freedom in a row were not equal to $nTests")
+      // again note that breeze matrices are column-major
+      System.arraycopy(tups(i).df, 0, dfArr, i*nTests, nTests)
+      System.arraycopy(tups(i).weight, 0, weightArr, i*nTests, nTests)
       // System.arraycopy(tups(i)._5.data, 0, corrArr, i*n, n)
       i += 1
     }
@@ -536,17 +541,6 @@ object GFisherDataPrep {
     val dfArr = new Array[Int](m * nTests)
     val weightArr = new Array[Double](m * nTests)
 
-    while (i < m) {
-      if (tups(i).weight.length != nTests || tups(i).df.length != nTests)
-        fatal(s"Number of tests in each row must be the same. Either weights or degrees of freedom in a row were not equal to $nTests")
-      // again note that breeze matrices are column-major
-      System.arraycopy(tups(i).df, 0, dfArr, i*nTests, nTests)
-      System.arraycopy(tups(i).weight, 0, weightArr, i*nTests, nTests)
-      // for (j <- (0 until nTests)) {
-      //   dfArr(i*nTests + j) = tups(i).df(j)
-      // }
-      i += 1
-    }
 
     // i = 0
     // while (i < m) {
@@ -581,10 +575,17 @@ object GFisherDataPrep {
     // important! breeze matrices are column-major, so we need to fill in the matrix by columns.
     // this makes no difference for correlation matrices, but we do need to be careful for the genotype, df, and weight matrices
 
+    val weightArr = new Array[Double](m * nTests)
+    val dfArr = new Array[Int](m * nTests)
     // fill in the genotype matrix
     val genoArr = new Array[Double](n*m)
     while (i < m) {
       pvalArr(i) = tups(i).pval
+      if (tups(i).weight.length != nTests || tups(i).df.length != nTests)
+        fatal(s"Number of tests in each row must be the same. Either weights or degrees of freedom in a row were not equal to $nTests")
+      // again note that breeze matrices are column-major
+      System.arraycopy(tups(i).df, 0, dfArr, i*nTests, nTests)
+      System.arraycopy(tups(i).weight, 0, weightArr, i*nTests, nTests)
       for (j <- (0 until n)) {
         genoArr(i + j*m) = tups(i).genoArr(j)
       }
@@ -592,19 +593,6 @@ object GFisherDataPrep {
     }
     i=0
     // fill in the df array and the weight array
-    val weightArr = new Array[Double](m * nTests)
-    val dfArr = new Array[Int](m * nTests)
-    while (i < m) {
-      if (tups(i).weight.length != nTests || tups(i).df.length != nTests)
-        fatal(s"Number of tests in each row must be the same. Either weights or degrees of freedom in a row were not equal to $nTests")
-      // again note that breeze matrices are column-major
-      System.arraycopy(tups(i).df, 0, dfArr, i*nTests, nTests)
-      System.arraycopy(tups(i).weight, 0, weightArr, i*nTests, nTests)
-      // for (j <- (0 until nTests)) {
-      //   dfArr(i*nTests + j) = tups(i).df(j)
-      // }
-      i += 1
-    }
     // i = 0
 
     // while (i < m) {
