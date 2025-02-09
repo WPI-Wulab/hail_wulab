@@ -327,7 +327,6 @@ object GFisherDataPrep {
       pvalArr(i) = tups(i).pval
       dfArr(i) = tups(i).df
       weightArr(i) = tups(i).weight
-      // System.arraycopy(tups(i)._5.data, 0, corrArr, i*n, n)
       i += 1
     }
     i = 0
@@ -358,7 +357,6 @@ object GFisherDataPrep {
     val pvalArr = new Array[Double](m)
     val weightArr = new Array[Double](m)
     val dfArr = new Array[Int](m)
-    // val corrArr = new Array[Double](m*n)
 
     var i = 0
     while (i < m) {
@@ -366,7 +364,6 @@ object GFisherDataPrep {
       pvalArr(i) = tups(i).pval
       dfArr(i) = tups(i).df
       weightArr(i) = tups(i).weight
-      // System.arraycopy(tups(i)._5.data, 0, corrArr, i*n, n)
       i += 1
     }
     i = 0
@@ -394,11 +391,11 @@ object GFisherDataPrep {
     nTests: Int
   ): (BDV[Double], BDM[Int], BDM[Double], BDM[Double]) = {
     require(tups.nonEmpty)
-    val c0 = tups(0).corrArr
-    // require(c0.offset == 0 && c0.stride == 1)
     val m: Int = tups.length // number of rows that were put in this group
     val rowIdxArr = new Array[Int](m)
     val pvalArr = new Array[Double](m)
+    val dfArr = new Array[Int](m * nTests)
+    val weightArr = new Array[Double](m * nTests)
 
     var i = 0
     while (i < m) {
@@ -425,22 +422,6 @@ object GFisherDataPrep {
       }
       i += 1
     }
-    i = 0
-    // fill in the df array and the weight array
-    val dfArr = new Array[Int](m * nTests)
-    val weightArr = new Array[Double](m * nTests)
-
-
-    // i = 0
-    // while (i < m) {
-    //   if (tups(i)._4.length != nTests)
-    //       fatal(s"Number of tests in each row must be the same, got ${tups(i)._3.length} weights in row $i, expected $nTests")
-    //   for (j <- (0 until nTests)) {
-    //     // again note that breeze matrices are column-major
-    //     weightArr(i*nTests + j) = tups(i).weight(j)
-    //   }
-    //   i += 1
-    // }
 
     val pval = new BDV(pvalArr)
     // again note that breeze matrices are column-major
@@ -481,18 +462,6 @@ object GFisherDataPrep {
       i += 1
     }
     i=0
-    // fill in the df array and the weight array
-    // i = 0
-
-    // while (i < m) {
-    //   if (tups(i)._4.length != nTests)
-    //       fatal(s"Number of tests in each row must be the same, got ${tups(i)._3.length} weights in row $i, expected $nTests")
-    //   for (j <- (0 until nTests)) {
-    //     // again note that breeze matrices are column-major
-    //     weightArr(i*nTests + j) = tups(i)._4(j)
-    //   }
-    //   i += 1
-    // }
 
     val pval = new BDV(pvalArr)
     // again note that breeze matrices are column-major
