@@ -310,117 +310,6 @@ object GFisherDataPrep {
     }.groupByKey()
   }
 
-  /**
-    * Collects values from a row-indexed hail array expression into a scala array, replacing missing values with a mean. returns false if every value is missing/NaN
-    *
-    * This function is used to collect the correlation values from the correlation array field in the hail MatrixTable.
-    *
-    * @param data array to fill
-    * @param ptr pointer created in MatrixValue.rvd.mapPartitions.flatMat
-    * @param rvRowType the MatrixValue.rowPType
-    * @param arrFieldName name of the array field in the MatrixValue
-    */
-  def setArrayMeanImputedDoubles(
-    data: Array[Double],
-    ptr: Long,
-    rvRowType: PStruct,
-    arrFieldName: String
-  ): Boolean = {
-
-    val arrField = rvRowType.field(arrFieldName)// PField
-    val arrFieldIdx = arrField.index // Int
-    val arrOffset = rvRowType.loadField(ptr, arrFieldIdx)// Long
-    val arrType = (rvRowType.types(arrFieldIdx)).asInstanceOf[PCanonicalArray] // PCanonicalArray hopefully
-
-    // stores indices of elements that are missing or NaN, and builds sum of non-missing values
-    val nanElts = new IntArrayBuilder()
-    val n = data.length
-    var sum = 0.0
-    var i = 0
-    while (i < n) {
-      if (arrType.isElementDefined(arrOffset, i)) {
-        val entryOffset = arrType.loadElement(arrOffset, i)// Long
-        val elt = Region.loadDouble(entryOffset)
-        if (! elt.isNaN) {
-          sum += elt
-          data(i) = elt
-        } else
-            nanElts += i
-      } else
-          nanElts += i
-      i += 1
-    }
-
-    val nMissing = nanElts.size
-
-    //if they were also missing
-    if (nMissing == n) return false
-
-    val mean = sum / (n - nMissing)
-
-    i = 0
-    // replace the missing values with the mean
-    while (i < nMissing) {
-      data(nanElts(i)) = mean
-      i += 1
-    }
-    return true
-  }
-
-  /**
-    * Collects values from a row-indexed hail array expression into a scala array, replacing missing values with a default value.
-    * returns false if every value is missing/NaN
-    *
-    * @param data array to fill
-    * @param ptr
-    * @param rvRowType
-    * @param arrFieldName
-    * @param defaultVal value to replace missing values with
-    */
-  def setArrayInt(
-    data: Array[Int],
-    ptr: Long,
-    rvRowType: PStruct,
-    arrFieldName: String,
-    defaultVal: Int = 2
-  ): Boolean = {
-
-    val arrField = rvRowType.field(arrFieldName)// PField
-    val arrFieldIdx = arrField.index // Int
-    val arrOffset = rvRowType.loadField(ptr, arrFieldIdx)// Long
-    val arrType = (rvRowType.types(arrFieldIdx)).asInstanceOf[PCanonicalArray] // PCanonicalArray? hopefully?
-
-    // stores indices of elements that are missing or NaN
-    val nanElts = new IntArrayBuilder()
-    val n = data.length
-    var i = 0
-    while (i < n) {
-      if (arrType.isElementDefined(arrOffset, i)) {
-        val entryOffset = arrType.loadElement(arrOffset, i)// Long
-        val elt = Region.loadInt(entryOffset)
-        if (! elt.isNaN) {
-          data(i) = elt
-        } else
-            nanElts += i
-      } else
-          nanElts += i
-      i += 1
-    }
-
-    val nMissing = nanElts.size
-
-    //if they were also missing
-    if (nMissing == n) return false
-
-    i = 0
-    // replace the missing values with the mean
-    while (i < nMissing) {
-      data(nanElts(i)) = defaultVal
-      i += 1
-    }
-    return true
-  }
-
   def gFisherTupsGenoToVectors(tups: Array[GFisherTupleGeno]): (BDV[Double], BDV[Int], BDV[Double], BDM[Double]) = {
     require(tups.nonEmpty)
     val g0 = tups(0).genoArr
@@ -610,6 +499,117 @@ object GFisherDataPrep {
     val df = new BDM[Int](nTests, m, dfArr)
     val weight = new BDM[Double](nTests, m, weightArr)
     return (pval, df, weight, new BDM(m,n, genoArr))
+  }
+
+    /**
+    * Collects values from a row-indexed hail array expression into a scala array, replacing missing values with a mean. returns false if every value is missing/NaN
+    *
+    * This function is used to collect the correlation values from the correlation array field in the hail MatrixTable.
+    *
+    * @param data array to fill
+    * @param ptr pointer created in MatrixValue.rvd.mapPartitions.flatMat
+    * @param rvRowType the MatrixValue.rowPType
+    * @param arrFieldName name of the array field in the MatrixValue
+    */
+  def setArrayMeanImputedDoubles(
+    data: Array[Double],
+    ptr: Long,
+    rvRowType: PStruct,
+    arrFieldName: String
+  ): Boolean = {
+
+    val arrField = rvRowType.field(arrFieldName)// PField
+    val arrFieldIdx = arrField.index // Int
+    val arrOffset = rvRowType.loadField(ptr, arrFieldIdx)// Long
+    val arrType = (rvRowType.types(arrFieldIdx)).asInstanceOf[PCanonicalArray] // PCanonicalArray hopefully
+
+    // stores indices of elements that are missing or NaN, and builds sum of non-missing values
+    val nanElts = new IntArrayBuilder()
+    val n = data.length
+    var sum = 0.0
+    var i = 0
+    while (i < n) {
+      if (arrType.isElementDefined(arrOffset, i)) {
+        val entryOffset = arrType.loadElement(arrOffset, i)// Long
+        val elt = Region.loadDouble(entryOffset)
+        if (! elt.isNaN) {
+          sum += elt
+          data(i) = elt
+        } else
+            nanElts += i
+      } else
+          nanElts += i
+      i += 1
+    }
+
+    val nMissing = nanElts.size
+
+    //if they were also missing
+    if (nMissing == n) return false
+
+    val mean = sum / (n - nMissing)
+
+    i = 0
+    // replace the missing values with the mean
+    while (i < nMissing) {
+      data(nanElts(i)) = mean
+      i += 1
+    }
+    return true
+  }
+
+  /**
+    * Collects values from a row-indexed hail array expression into a scala array, replacing missing values with a default value.
+    * returns false if every value is missing/NaN
+    *
+    * @param data array to fill
+    * @param ptr
+    * @param rvRowType
+    * @param arrFieldName
+    * @param defaultVal value to replace missing values with
+    */
+  def setArrayInt(
+    data: Array[Int],
+    ptr: Long,
+    rvRowType: PStruct,
+    arrFieldName: String,
+    defaultVal: Int = 2
+  ): Boolean = {
+
+    val arrField = rvRowType.field(arrFieldName)// PField
+    val arrFieldIdx = arrField.index // Int
+    val arrOffset = rvRowType.loadField(ptr, arrFieldIdx)// Long
+    val arrType = (rvRowType.types(arrFieldIdx)).asInstanceOf[PCanonicalArray] // PCanonicalArray? hopefully?
+
+    // stores indices of elements that are missing or NaN
+    val nanElts = new IntArrayBuilder()
+    val n = data.length
+    var i = 0
+    while (i < n) {
+      if (arrType.isElementDefined(arrOffset, i)) {
+        val entryOffset = arrType.loadElement(arrOffset, i)// Long
+        val elt = Region.loadInt(entryOffset)
+        if (! elt.isNaN) {
+          data(i) = elt
+        } else
+            nanElts += i
+      } else
+          nanElts += i
+      i += 1
+    }
+
+    val nMissing = nanElts.size
+
+    //if they were also missing
+    if (nMissing == n) return false
+
+    i = 0
+    // replace the missing values with the mean
+    while (i < nMissing) {
+      data(nanElts(i)) = defaultVal
+      i += 1
+    }
+    return true
   }
 
 }
