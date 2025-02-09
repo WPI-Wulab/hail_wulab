@@ -6,6 +6,7 @@ package is.hail.methods.gfisher
 import is.hail.annotations.{Annotation, UnsafeRow, Region}
 import is.hail.expr.ir.{IntArrayBuilder, MatrixValue}
 
+import is.hail.stats.RegressionUtils
 
 import is.hail.types.physical.{PStruct, PCanonicalArray}
 import is.hail.types.virtual.{TFloat64}
@@ -227,6 +228,88 @@ object GFisherDataPrep {
     }.groupByKey()
   }
 
+
+  def prepGFisherRDD_Genotype(
+    mv: MatrixValue,
+    keyField: String,
+    pField: String,
+    dfField: String,
+    weightField: String,
+    genotypeField: String
+  ): RDD[(Annotation, Iterable[GFisherTupleGeno])] = {
+
+    val fullRowType = mv.rvRowPType //PStruct
+
+    val keyStructField = fullRowType.field(keyField) //:PField
+    val keyIndex: Int = keyStructField.index
+    val keyType = keyStructField.typ // PType
+
+    // get the field the p-value is in
+    val pStructField = fullRowType.field(pField)
+    val pIndex = pStructField.index
+    assert(pStructField.typ.virtualType == TFloat64)
+
+    // for the genotype entry-array
+    val entryArrayType = mv.entryArrayPType
+    val entryType = mv.entryPType
+    val fieldType = entryType.field(genotypeField).typ
+    assert(fieldType.virtualType == TFloat64)
+
+    val entryArrayIdx = mv.entriesIdx
+    val fieldIdx = entryType.fieldIdx(genotypeField)
+
+    //get the field the weight is in
+    val weightStructField = fullRowType.field(weightField)
+    val weightIndex = weightStructField.index
+    assert(weightStructField.typ.virtualType == TFloat64)
+
+    // get the field the degree of freedom is in
+    val dfStructField = fullRowType.field(dfField)
+    val dfIndex = dfStructField.index
+
+    val nCols = mv.nCols
+
+    mv.rvd.mapPartitions { (ctx, it) =>
+      it.flatMap { ptr =>
+
+        val keyIsDefined = fullRowType.isFieldDefined(ptr, keyIndex)
+        val weightIsDefined = fullRowType.isFieldDefined(ptr, weightIndex)
+        val pIsDefined = fullRowType.isFieldDefined(ptr, pIndex)
+        val dfIsDefined = fullRowType.isFieldDefined(ptr, dfIndex)
+
+        if (keyIsDefined && weightIsDefined && pIsDefined && dfIsDefined) {
+          val weight = Region.loadDouble(fullRowType.loadField(ptr, weightIndex))
+          val pval = Region.loadDouble(fullRowType.loadField(ptr, pIndex))
+          val df = Region.loadInt(fullRowType.loadField(ptr, dfIndex))
+          if (weight < 0)
+            fatal(s"Row weights must be non-negative, got $weight")
+          val key = Annotation.copy(
+            keyType.virtualType,
+            UnsafeRow.read(keyType, ctx.r, fullRowType.loadField(ptr, keyIndex)),
+          )
+
+          val data = new Array[Double](nCols)// array that will hold the genotype data
+
+          // get the correlation values and make sure they aren't all missing/NaN
+          RegressionUtils.setMeanImputedDoubles(
+            data,
+            0,
+            (0 until nCols).toArray,
+            new IntArrayBuilder(),
+            ptr,
+            fullRowType,
+            entryArrayType,
+            entryType,
+            entryArrayIdx,
+            fieldIdx
+          )
+          Some((key, GFisherTupleGeno(pval, df, weight, data)))
+
+        } else None
+      }
+    }.groupByKey()
+  }
+
   /**
     * Collects values from a row-indexed hail array expression into a scala array, replacing missing values with a mean. returns false if every value is missing/NaN
     *
@@ -338,6 +421,38 @@ object GFisherDataPrep {
     return true
   }
 
+  def gFisherTupsGenoToVectors(tups: Array[GFisherTupleGeno]): (BDV[Double], BDV[Int], BDV[Double], BDM[Double]) = {
+    require(tups.nonEmpty)
+    val g0 = tups(0).genoArr
+    // require(g0.offset == 0 && g0.stride == 1)
+    val n = g0.size
+    val m: Int = tups.length // number of rows that were put in this group
+
+    val pvalArr = new Array[Double](m)
+    val weightArr = new Array[Double](m)
+    val dfArr = new Array[Int](m)
+    // val corrArr = new Array[Double](m*n)
+
+    var i = 0
+    while (i < m) {
+      pvalArr(i) = tups(i).pval
+      dfArr(i) = tups(i).df
+      weightArr(i) = tups(i).weight
+      // System.arraycopy(tups(i)._5.data, 0, corrArr, i*n, n)
+      i += 1
+    }
+    i = 0
+
+    // fill in the correlation matrix
+    val genoArr = new Array[Double](n*m)
+    while (i < m) {
+      for (j <- (0 until n)) {
+        genoArr(i + j*m) = tups(i).genoArr(j)
+      }
+      i += 1
+    }
+    return (BDV(pvalArr), BDV(dfArr), BDV(weightArr), new BDM(m, n, genoArr))
+  }
   /**
     * Used to convert the iterable of rows in a group to a set of vectors and a matrix.
     *
@@ -419,34 +534,94 @@ object GFisherDataPrep {
     i = 0
     // fill in the df array and the weight array
     val dfArr = new Array[Int](m * nTests)
-    while (i < m) {
-      if (a(i)._3.length != nTests)
-        fatal(s"Number of tests in each row must be the same, got ${a(i)._3.length} degrees of freedom in row $i of a group, expected $nTests")
-      // again note that breeze matrices are column-major
-      for (j <- (0 until nTests)) {
-        dfArr(i*nTests + j) = a(i)._3(j)
-      }
-      i += 1
-    }
-    i = 0
     val weightArr = new Array[Double](m * nTests)
+
     while (i < m) {
-      if (a(i)._4.length != nTests)
-          fatal(s"Number of tests in each row must be the same, got ${a(i)._3.length} weights in row $i, expected $nTests")
-      for (j <- (0 until nTests)) {
-        // again note that breeze matrices are column-major
-        weightArr(i*nTests + j) = a(i)._4(j)
-      }
+      if (tups(i).weight.length != nTests || tups(i).df.length != nTests)
+        fatal(s"Number of tests in each row must be the same. Either weights or degrees of freedom in a row were not equal to $nTests")
+      // again note that breeze matrices are column-major
+      System.arraycopy(tups(i).df, 0, dfArr, i*nTests, nTests)
+      System.arraycopy(tups(i).weight, 0, weightArr, i*nTests, nTests)
+      // for (j <- (0 until nTests)) {
+      //   dfArr(i*nTests + j) = tups(i).df(j)
+      // }
       i += 1
     }
 
-    val rowIdx = new BDV(rowIdxArr)
+    // i = 0
+    // while (i < m) {
+    //   if (tups(i)._4.length != nTests)
+    //       fatal(s"Number of tests in each row must be the same, got ${tups(i)._3.length} weights in row $i, expected $nTests")
+    //   for (j <- (0 until nTests)) {
+    //     // again note that breeze matrices are column-major
+    //     weightArr(i*nTests + j) = tups(i).weight(j)
+    //   }
+    //   i += 1
+    // }
+
     val pval = new BDV(pvalArr)
     // again note that breeze matrices are column-major
     val df = new BDM[Int](nTests, m, dfArr)
     val weight = new BDM[Double](nTests, m, weightArr)
     val corr = new BDM[Double](m, m, corrArr)
-    return (rowIdx, pval, df, weight, corr)
+    return (pval, df, weight, corr)
+  }
+
+  def oGFisherTupsGenoToVectors(
+    tups: Array[OGFisherTupleGeno],
+    nTests: Int
+  ): (BDV[Double], BDM[Int], BDM[Double], BDM[Double]) = {
+    require(tups.nonEmpty)
+    val m: Int = tups.length // number of rows that were put in this group
+    val pvalArr = new Array[Double](m)
+    val g0 = tups(0).genoArr
+    val n = g0.size // number of samples
+    var i = 0
+
+    // important! breeze matrices are column-major, so we need to fill in the matrix by columns.
+    // this makes no difference for correlation matrices, but we do need to be careful for the genotype, df, and weight matrices
+
+    // fill in the genotype matrix
+    val genoArr = new Array[Double](n*m)
+    while (i < m) {
+      pvalArr(i) = tups(i).pval
+      for (j <- (0 until n)) {
+        genoArr(i + j*m) = tups(i).genoArr(j)
+      }
+      i += 1
+    }
+    i=0
+    // fill in the df array and the weight array
+    val weightArr = new Array[Double](m * nTests)
+    val dfArr = new Array[Int](m * nTests)
+    while (i < m) {
+      if (tups(i).weight.length != nTests || tups(i).df.length != nTests)
+        fatal(s"Number of tests in each row must be the same. Either weights or degrees of freedom in a row were not equal to $nTests")
+      // again note that breeze matrices are column-major
+      System.arraycopy(tups(i).df, 0, dfArr, i*nTests, nTests)
+      System.arraycopy(tups(i).weight, 0, weightArr, i*nTests, nTests)
+      // for (j <- (0 until nTests)) {
+      //   dfArr(i*nTests + j) = tups(i).df(j)
+      // }
+      i += 1
+    }
+    // i = 0
+
+    // while (i < m) {
+    //   if (tups(i)._4.length != nTests)
+    //       fatal(s"Number of tests in each row must be the same, got ${tups(i)._3.length} weights in row $i, expected $nTests")
+    //   for (j <- (0 until nTests)) {
+    //     // again note that breeze matrices are column-major
+    //     weightArr(i*nTests + j) = tups(i)._4(j)
+    //   }
+    //   i += 1
+    // }
+
+    val pval = new BDV(pvalArr)
+    // again note that breeze matrices are column-major
+    val df = new BDM[Int](nTests, m, dfArr)
+    val weight = new BDM[Double](nTests, m, weightArr)
+    return (pval, df, weight, new BDM(m,n, genoArr))
   }
 
 }
