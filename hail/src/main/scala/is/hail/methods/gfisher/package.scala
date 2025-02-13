@@ -7,9 +7,120 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
 import breeze.numerics.{abs, sqrt, sigmoid}
 import breeze.optimize.{DiffFunction, minimize}
 import net.sourceforge.jdistlib.{ChiSquare, Normal}
-
+import is.hail.types.physical.PStruct
 
 package object gfisher {
+
+  def all[T](vals: Iterable[T], condition: (T) => Boolean): Boolean = {
+    for (x <- vals) {
+      if (!condition(x)) {
+        return false
+      }
+    }
+    return true
+  }
+
+  def all(bools: Iterable[Boolean]): Boolean = {
+    for (bool <- bools) {
+      if (!bool)
+        return false
+    }
+    return true
+  }
+
+  def cor(x: BDV[Double], y: BDV[Double]): Double = {
+    val n = x.length
+    val mx = sum(x) / n.toDouble
+    val my = sum(y) / n.toDouble
+    val xmx = x - mx
+    val ymy = y - my
+    return (xmx dot ymy) / sqrt(xmx dot xmx) / sqrt(ymy dot ymy)
+  }
+
+  def rowCorBad(X: BDM[Double]): BDM[Double] = {
+    val rows = X.rows
+    val rowsD = rows.toDouble
+    // val cols = X.cols
+    val res = BDM.eye[Double](rows)
+    val rowMeans = new Array[Double](rows)
+
+    for (i <- 0 until rows) {
+      rowMeans(i) = sum(X(i,::)) / rowsD
+      //maybe: do x - xbar before
+    }
+    for (i <- 0 until (rows - 1)) {
+      // maybe get Xi - Xbar here
+      val xmx = X(i,::) - rowMeans(i)
+      for (j <- (i + 1) until rows) {
+        val ymy = X(j,::) - rowMeans(j)
+        res(i, j) = sum(xmx *:* ymy) / sqrt(sum(xmx *:* xmx)) / sqrt(sum(ymy *:* ymy))
+        res(j,i) = res(i,j)
+      }
+    }
+    return res
+  }
+
+  /**
+    * Calculate Pearson's correlation coefficient between the rows of a matrix
+    *
+    * This method creates a copy of the matrix to avoid modifying it.
+    *
+    * @param x
+    */
+  def rowCorrelation(x: BDM[Double]): BDM[Double] = {
+    val rows = x.rows
+    val cols = x.cols
+    val colsD = cols.toDouble
+    val X = new BDM(rows, cols, x.data.clone())
+    val res = BDM.eye[Double](rows)
+    val sumSqrs = new Array[Double](rows)
+    for (i <- 0 until rows) {
+      var sum = 0.0
+      for (j <- 0 until cols)
+        sum += X(i,j)
+      val mean = sum / colsD
+      var sumSqr = 0.0
+      for (j <- 0 until cols) {
+        X(i,j) = X(i,j) - mean
+        sumSqr += math.pow(X(i,j), 2.0)
+      }
+      sumSqrs(i) = math.sqrt(sumSqr)
+    }
+    for (i <- 0 until rows) {
+      for (j <- (i+1) until rows) {
+        var numerator = 0.0
+        for (k <- 0 until cols)
+          numerator += X(i, k) * X(j, k)
+        val denom = sumSqrs(i) * sumSqrs(j)
+        res(i,j) = numerator / denom
+        res(j,i) = res(i,j)
+      }
+    }
+    return res
+  }
+
+  def rowCorrelationSlow(X: BDM[Double]): BDM[Double] = {
+    val rows = X.rows
+    val cols = X.cols
+    val rowMeans = sum(X(*,::)) / cols.toDouble
+    val XMX = X(::, *) - rowMeans
+    val res = BDM.eye[Double](rows)
+    for (i <- 0 until (rows - 1)) {
+      for (j <- (i+1) until (rows)) {
+        res(i, j) = (XMX(i,::) dot XMX(j,::)) / sqrt(XMX(i,::) dot XMX(i,::)) / sqrt(XMX(j,::) dot XMX(j,::))
+        res(j, i) = res(i, j)
+      }
+    }
+    return res
+  }
+
+  def getFieldIds(fullRowType: PStruct, fieldNames: String*): Array[Int] = {
+    val idxs = new Array[Int](fieldNames.length)
+    for (i <- 0 until fieldNames.length)
+      idxs(i) = fullRowType.field(fieldNames(i)).index
+    return idxs
+  }
+
 
   def mean(x: BDV[Double]): Double = sum(x) / x.size
 

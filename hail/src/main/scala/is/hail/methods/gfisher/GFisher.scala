@@ -115,7 +115,7 @@ case class OGFisher(
   def preservesPartitionCounts: Boolean = false
 
   def execute(ctx: ExecuteContext, mv: MatrixValue): TableValue = {
-    val groupedRDD = GFisherDataPrep.prepOGFisherCorrRDD(mv, nTests, keyField, pField, dfField, weightField, corrField, rowIDXField)
+    val groupedRDD = GFisherDataPrep.prepOGFisherCorrRDD(mv, keyField, pField, dfField, weightField, corrField, rowIDXField, nTests)
     val newrdd = groupedRDD.map{case(key, vals) =>
       val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
