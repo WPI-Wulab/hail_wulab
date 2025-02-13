@@ -171,6 +171,8 @@ class GFisherGenoRowProcessor(
     val df = getInt(fieldIds.df)
     val weight = getDouble(fieldIds.weight)
     val genoArr = getEntryArray(fieldIds.geno, fieldIds.entryArray, nCols)
+    if (genoArr.distinct.length == 1)
+      return None
     return Some((key, new GFisherTupleGeno(pval=pval, df=df, weight=weight, genoArr=genoArr)))
   }
 }
@@ -218,6 +220,8 @@ class OGFisherGenoRowProcessor(
     val df = getIntArray(fieldIds.df)
     val weight = getDoubleArray(fieldIds.weight)
     val genoArr = getEntryArray(fieldIds.geno, fieldIds.entryArray, nCols)
+    if (genoArr.distinct.length == 1)
+      return None
     return Some((key, new OGFisherTupleGeno(pval=pval, df=df, weight=weight, genoArr=genoArr)))
   }
 }
