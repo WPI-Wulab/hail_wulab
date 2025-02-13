@@ -35,6 +35,8 @@ case class GFisher(
   pField: String,
   dfField: String,
   weightField: String,
+  useGenotype: Boolean,
+  genoField: String,
   corrField: String,
   rowIDXField: String,
   method: String,
@@ -53,16 +55,40 @@ case class GFisher(
   def preservesPartitionCounts: Boolean = false
 
   def execute(ctx: ExecuteContext, mv: MatrixValue): TableValue = {
-    val groupedRDD = GFisherDataPrep.prepGFisherCorrRDD(mv, keyField, pField, dfField, weightField, corrField, rowIDXField)
-    val newrdd = groupedRDD.map{case(key, vals) =>
-      val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
-      val (pvals: BDV[Double], df: BDV[Int], w: BDV[Double], corrMat: BDM[Double]) = GFisherDataPrep.gFisherTupsCorrToVectors(valArr)
-      val gFishStat: Double = StatGFisher.statGFisher(pvals, df, w)
-      val gFishPVal: Double = if (method == "HYB") PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
-                              else if (method == "MR") PGFisher.pGFisherMR(gFishStat, df, w, corrMat)
-                              else PGFisher.pGFisherGB(gFishStat, df, w, corrMat)
-      Row(key, gFishStat, gFishPVal)
+    def genotypeData() = {
+      val groupedRDD = GFisherDataPrep.prepGFisherGenoRDD(mv, keyField, pField, dfField, weightField, genoField)
+      val newrdd = groupedRDD.map{case(key, vals) =>
+        val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
+
+        val (pvals: BDV[Double], df: BDV[Int], w: BDV[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.gFisherGeno(valArr)
+        val gFishStat: Double = StatGFisher.statGFisher(pvals, df, w)
+        val gFishPVal: Double = if (method == "HYB") PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
+                                else if (method == "MR") PGFisher.pGFisherMR(gFishStat, df, w, corrMat, oneSided)
+                                else PGFisher.pGFisherGB(gFishStat, df, w, corrMat, oneSided)
+        Row(key, gFishStat, gFishPVal)
+      }
+      newrdd
+    }
+    def corrData() = {
+      val groupedRDD = GFisherDataPrep.prepGFisherCorrRDD(mv, keyField, pField, dfField, weightField, corrField, rowIDXField)
+      val newrdd = groupedRDD.map{case(key, vals) =>
+        val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
+
+        val (pvals: BDV[Double], df: BDV[Int], w: BDV[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.gFisherCorr(valArr)
+        val gFishStat: Double = StatGFisher.statGFisher(pvals, df, w)
+        val gFishPVal: Double = if (method == "HYB") PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
+                                else if (method == "MR") PGFisher.pGFisherMR(gFishStat, df, w, corrMat, oneSided)
+                                else PGFisher.pGFisherGB(gFishStat, df, w, corrMat, oneSided)
+        Row(key, gFishStat, gFishPVal)
+      }
+      newrdd
+    }
+
+    val newrdd = if (useGenotype) {
+      genotypeData()
+    } else {
+      corrData()
     }
     TableValue(ctx, typ(mv.typ).rowType, typ(mv.typ).key, newrdd)
   }
@@ -90,6 +116,8 @@ case class OGFisher(
   pField: String,
   dfField: String,
   weightField: String,
+  useGenotype: Boolean,
+  genoField: String,
   corrField: String,
   rowIDXField: String,
   method: String,
@@ -115,20 +143,47 @@ case class OGFisher(
   def preservesPartitionCounts: Boolean = false
 
   def execute(ctx: ExecuteContext, mv: MatrixValue): TableValue = {
-    val groupedRDD = GFisherDataPrep.prepOGFisherCorrRDD(mv, keyField, pField, dfField, weightField, corrField, rowIDXField, nTests)
-    val newrdd = groupedRDD.map{case(key, vals) =>
-      val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
+    def genotypeData() = {
+      val groupedRDD = GFisherDataPrep.prepOGFisherCorrRDD(mv, keyField, pField, dfField, weightField, corrField, rowIDXField, nTests)
+      val newrdd = groupedRDD.map{case(key, vals) =>
+        val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
-      val (pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherDataPrep.oGFisherTupsCorrToVectors(valArr, nTests)
-      val res = PvalOGFisher.pvalOGFisher(pvals, df, w, corrMat, method = method)
-      Row(key,
-        res("stat"),
-        res("pval"),
-        res("stat_indi").asInstanceOf[BDV[Double]].toArray.toFastSeq,
-        res("pval_indi").asInstanceOf[BDV[Double]].toArray.toFastSeq
-        // res("stat_indi"),
-        // res("pval_indi")
-      )
+        val (pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.oGFisherCorr(valArr, nTests)
+        val res = PvalOGFisher.pvalOGFisher(pvals, df, w, corrMat, method = method)
+        Row(key,
+          res("stat"),
+          res("pval"),
+          res("stat_indi").asInstanceOf[BDV[Double]].toArray.toFastSeq,
+          res("pval_indi").asInstanceOf[BDV[Double]].toArray.toFastSeq
+          // res("stat_indi"),
+          // res("pval_indi")
+        )
+      }
+      newrdd
+    }
+
+    def corrData() = {
+      val groupedRDD = GFisherDataPrep.prepOGFisherCorrRDD(mv, keyField, pField, dfField, weightField, corrField, rowIDXField, nTests)
+      val newrdd = groupedRDD.map{case(key, vals) =>
+        val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
+
+        val (pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.oGFisherCorr(valArr, nTests)
+        val res = PvalOGFisher.pvalOGFisher(pvals, df, w, corrMat, method = method)
+        Row(key,
+          res("stat"),
+          res("pval"),
+          res("stat_indi").asInstanceOf[BDV[Double]].toArray.toFastSeq,
+          res("pval_indi").asInstanceOf[BDV[Double]].toArray.toFastSeq
+          // res("stat_indi"),
+          // res("pval_indi")
+        )
+      }
+      newrdd
+    }
+    val newrdd = if (useGenotype) {
+      genotypeData()
+    } else {
+      corrData()
     }
     TableValue(ctx, typ(mv.typ).rowType, typ(mv.typ).key, newrdd)
   }

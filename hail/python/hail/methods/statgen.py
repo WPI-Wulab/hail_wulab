@@ -3130,12 +3130,13 @@ def simple_group_sum(key_expr, x) -> Table:
     pval=expr_float64,
     df=expr_int32,
     w=expr_float64,
-    corr=expr_array(expr_float64),
-    corr_idx=expr_oneof(expr_int32, expr_int64),
+    genotype=nullable(expr_float64),
+    corr=nullable(expr_array(expr_float64)),
+    corr_idx=nullable(expr_oneof(expr_int32, expr_int64)),
     method=str,
     one_sided=bool,
 )
-def gfisher(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
+def gfisher(key, pval, df, w, genotype=None, corr=None, corr_idx=None, method="HYB", one_sided=False):
     """Run GFisher Analysis on a dataset
 
     Args:
@@ -3169,14 +3170,29 @@ def gfisher(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
     ```
     """
     mt = matrix_table_source("gfisher", key)
-
+    use_genotype = genotype is not None
     # FIXME: remove this logic when annotation is better optimized (taken from line 3050 of skat function)
     # used to name group column in the output table to what it was in the input. Logic taken from line 3050 of skat function
     key_name_out = mt._fields_inverse[key] if key in mt._fields_inverse else "id"
+    row_exprs = {'__key': key, '__pvalue': pval, '__weight': w, '__df': df}
 
-    mt = mt._select_all(
-        row_exprs={'__key': key, '__pvalue': pval, '__weight': w, '__corr': corr, '__df': df, '__rowIdx': corr_idx}
-    )
+    if use_genotype:
+        raise_unless_entry_indexed('gfisher/genotype', genotype)
+        print("Using given genotype to calculate correlation")
+        # FIXME: remove this logic when annotation is better optimized
+        if genotype in mt._fields_inverse:
+            geno_field_name = mt._fields_inverse[genotype]
+            entry_expr = {}
+        else:
+            geno_field_name = Env.get_uid()
+            entry_expr = {geno_field_name: genotype}
+    else:
+        row_exprs['__corr'] = corr
+        row_exprs['__rowIdx'] = corr_idx
+        geno_field_name = "__genotype"
+        entry_expr = {}
+
+    mt = mt._select_all(row_exprs=row_exprs, entry_exprs=entry_expr)
 
     if method not in ["HYB", "MR", "GB"]:
         raise ValueError(f'gfisher: method must be one of "HYB", "MR", "GB". received value "{method}"')
@@ -3187,6 +3203,8 @@ def gfisher(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
         'keyFieldOut': key_name_out,
         'pField': '__pvalue',
         'dfField': '__df',
+        'useGenotype': use_genotype,
+        "genoField": geno_field_name,
         'weightField': '__weight',
         'corrField': '__corr',
         'rowIDXField': '__rowIdx',
@@ -3207,7 +3225,7 @@ def gfisher(key, pval, df, w, corr, corr_idx, method="HYB", one_sided=False):
     method=str,
     one_sided=bool,
 )
-def ogfisher(key, pval, df, w, corr, corr_idx, n_tests, method="HYB", one_sided=False):
+def ogfisher(key, pval, df, w, n_tests, genotype=None, corr=None, corr_idx=None, method="HYB", one_sided=False):
     """Run GFisher Analysis on a dataset
 
     Args:
@@ -3241,14 +3259,29 @@ def ogfisher(key, pval, df, w, corr, corr_idx, n_tests, method="HYB", one_sided=
     ```
     """
     mt = matrix_table_source("ogfisher", key)
-
+    use_genotype = genotype is not None
     # FIXME: remove this logic when annotation is better optimized (taken from line 3050 of skat function)
     # used to name group column in the output table to what it was in the input. Logic taken from line 3050 of skat function
     key_name_out = mt._fields_inverse[key] if key in mt._fields_inverse else "id"
+    row_exprs = {'__key': key, '__pvalue': pval, '__weight': w, '__df': df}
 
-    mt = mt._select_all(
-        row_exprs={'__key': key, '__pvalue': pval, '__weight': w, '__corr': corr, '__df': df, '__rowIdx': corr_idx}
-    )
+    if use_genotype:
+        raise_unless_entry_indexed('gfisher/genotype', genotype)
+        print("Using given genotype to calculate correlation")
+        # FIXME: remove this logic when annotation is better optimized
+        if genotype in mt._fields_inverse:
+            geno_field_name = mt._fields_inverse[genotype]
+            entry_expr = {}
+        else:
+            geno_field_name = Env.get_uid()
+            entry_expr = {geno_field_name: genotype}
+    else:
+        row_exprs['__corr'] = corr
+        row_exprs['__rowIdx'] = corr_idx
+        geno_field_name = "__genotype"
+        entry_expr = {}
+
+    mt = mt._select_all(row_exprs=row_exprs, entry_exprs=entry_expr)
 
     if method not in ["HYB", "MR", "GB"]:
         raise ValueError(f'gfisher: method must be one of "HYB", "MR", "GB". received value "{method}"')
@@ -3261,6 +3294,8 @@ def ogfisher(key, pval, df, w, corr, corr_idx, n_tests, method="HYB", one_sided=
         'pField': '__pvalue',
         'dfField': '__df',
         'weightField': '__weight',
+        'useGenotype': use_genotype,
+        'genoField': geno_field_name,
         'corrField': '__corr',
         'rowIDXField': '__rowIdx',
         'method': method,
