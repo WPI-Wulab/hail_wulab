@@ -157,11 +157,11 @@ case class OGFisher(
 
   def execute(ctx: ExecuteContext, mv: MatrixValue): TableValue = {
     def genotypeData() = {
-      val groupedRDD = GFisherDataPrep.prepOGFisherCorrRDD(mv, keyField, pField, dfField, weightField, corrField, rowIDXField, nTests)
+      val groupedRDD = GFisherDataPrep.prepOGFisherGenoRDD(mv, keyField, pField, dfField, weightField, genoField, nTests)
       val newrdd = groupedRDD.map{case(key, vals) =>
         val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
-        val (pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.oGFisherCorr(valArr, nTests)
+        val (pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.oGFisherGeno(valArr, nTests)
         val res = PvalOGFisher.pvalOGFisher(pvals, df, w, corrMat, method = method)
         Row(key,
           res("stat"),
