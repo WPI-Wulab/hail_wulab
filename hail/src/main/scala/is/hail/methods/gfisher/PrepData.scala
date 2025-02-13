@@ -362,168 +362,6 @@ object GFisherDataPrep {
     }.groupByKey()
   }
 
-  def gFisherTupsGenoToVectors(tups: Array[GFisherTupleGeno]): (BDV[Double], BDV[Int], BDV[Double], BDM[Double]) = {
-    require(tups.nonEmpty)
-    val g0 = tups(0).genoArr
-    // require(g0.offset == 0 && g0.stride == 1)
-    val n = g0.size
-    val m: Int = tups.length // number of rows that were put in this group
-
-    val pvalArr = new Array[Double](m)
-    val weightArr = new Array[Double](m)
-    val dfArr = new Array[Int](m)
-    // val corrArr = new Array[Double](m*n)
-
-    var i = 0
-    while (i < m) {
-      pvalArr(i) = tups(i).pval
-      dfArr(i) = tups(i).df
-      weightArr(i) = tups(i).weight
-      i += 1
-    }
-    i = 0
-
-    // fill in the correlation matrix
-    val genoArr = new Array[Double](n*m)
-    while (i < m) {
-      for (j <- (0 until n)) {
-        genoArr(i + j*m) = tups(i).genoArr(j)
-      }
-      i += 1
-    }
-    return (BDV(pvalArr), BDV(dfArr), BDV(weightArr), new BDM(m, n, genoArr))
-  }
-  /**
-    * Used to convert the iterable of rows in a group to a set of vectors and a matrix.
-    *
-    * @param tups array containing
-    */
-  def gFisherTupsCorrToVectors(
-    tups: Array[GFisherTupleCorr]
-  ): (BDV[Double], BDV[Int], BDV[Double], BDM[Double]) = {
-    require(tups.nonEmpty)
-    // require(c0.offset == 0 && c0.stride == 1)
-    val m: Int = tups.length // number of rows that were put in this group
-
-    val rowIdxArr = new Array[Int](m)
-    val pvalArr = new Array[Double](m)
-    val weightArr = new Array[Double](m)
-    val dfArr = new Array[Int](m)
-
-    var i = 0
-    while (i < m) {
-      rowIdxArr(i) = tups(i).rowIdx
-      pvalArr(i) = tups(i).pval
-      dfArr(i) = tups(i).df
-      weightArr(i) = tups(i).weight
-      i += 1
-    }
-    i = 0
-    val corrArr = new Array[Double](m*m)
-    // fill in the correlation matrix
-    while (i < m) {
-      for (j <- (0 until m)) {
-        corrArr(i*m+j) = tups(i).corrArr(rowIdxArr(j))
-      }
-      i += 1
-    }
-    val corrMatrix = new BDM[Double](m, m, corrArr)
-    return (BDV(pvalArr), BDV(dfArr), BDV(weightArr), corrMatrix)
-  }
-
-
-
-  /**
-    * Used to convert the iterable of rows in a group to a set of vectors and matrices for OGFisher.
-    *
-    * @param tups array containing
-    */
-  def oGFisherTupsCorrToVectors(
-    tups: Array[OGFisherTupleCorr],
-    nTests: Int
-  ): (BDV[Double], BDM[Int], BDM[Double], BDM[Double]) = {
-    require(tups.nonEmpty)
-    val m: Int = tups.length // number of rows that were put in this group
-    val rowIdxArr = new Array[Int](m)
-    val pvalArr = new Array[Double](m)
-    val dfArr = new Array[Int](m * nTests)
-    val weightArr = new Array[Double](m * nTests)
-
-    var i = 0
-    while (i < m) {
-      rowIdxArr(i) = tups(i).rowIdx
-      pvalArr(i) = tups(i).pval
-      if (tups(i).weight.length != nTests || tups(i).df.length != nTests)
-        fatal(s"Number of tests in each row must be the same. Either weights or degrees of freedom in a row were not equal to $nTests")
-      // again note that breeze matrices are column-major
-      System.arraycopy(tups(i).df, 0, dfArr, i*nTests, nTests)
-      System.arraycopy(tups(i).weight, 0, weightArr, i*nTests, nTests)
-      // System.arraycopy(tups(i)._5.data, 0, corrArr, i*n, n)
-      i += 1
-    }
-    i = 0
-    val corrArr = new Array[Double](m*m)
-
-    // important! breeze matrices are column-major, so we need to fill in the matrix by columns.
-    // this makes no difference for correlation matrices, but we do need to be careful for the df and weight matrices
-
-    // fill in the correlation matrix
-    while (i < m) {
-      for (j <- (0 until m)) {
-        corrArr(i*m+j) = tups(i).corrArr(rowIdxArr(j))
-      }
-      i += 1
-    }
-
-    val pval = new BDV(pvalArr)
-    // again note that breeze matrices are column-major
-    val df = new BDM[Int](nTests, m, dfArr)
-    val weight = new BDM[Double](nTests, m, weightArr)
-    val corr = new BDM[Double](m, m, corrArr)
-    return (pval, df, weight, corr)
-  }
-
-  def oGFisherTupsGenoToVectors(
-    tups: Array[OGFisherTupleGeno],
-    nTests: Int
-  ): (BDV[Double], BDM[Int], BDM[Double], BDM[Double]) = {
-    require(tups.nonEmpty)
-    val m: Int = tups.length // number of rows that were put in this group
-    val pvalArr = new Array[Double](m)
-    val g0 = tups(0).genoArr
-    val n = g0.size // number of samples
-    var i = 0
-
-    // important! breeze matrices are column-major, so we need to fill in the matrix by columns.
-    // this makes no difference for correlation matrices, but we do need to be careful for the genotype, df, and weight matrices
-
-    val weightArr = new Array[Double](m * nTests)
-    val dfArr = new Array[Int](m * nTests)
-    // fill in the genotype matrix
-    val genoArr = new Array[Double](n*m)
-    while (i < m) {
-      pvalArr(i) = tups(i).pval
-      if (tups(i).weight.length != nTests || tups(i).df.length != nTests)
-        fatal(s"Number of tests in each row must be the same. Either weights or degrees of freedom in a row were not equal to $nTests")
-      // again note that breeze matrices are column-major
-      System.arraycopy(tups(i).df, 0, dfArr, i*nTests, nTests)
-      System.arraycopy(tups(i).weight, 0, weightArr, i*nTests, nTests)
-      for (j <- (0 until n)) {
-        genoArr(i + j*m) = tups(i).genoArr(j)
-      }
-      i += 1
-    }
-    i=0
-
-    val pval = new BDV(pvalArr)
-    // again note that breeze matrices are column-major
-    val df = new BDM[Int](nTests, m, dfArr)
-    val weight = new BDM[Double](nTests, m, weightArr)
-    val G = new BDM(m, n, genoArr)
-    val M = rowCorrelation(G)
-    return (pval, df, weight, M)
-  }
-
     /**
     * Collects values from a row-indexed hail array expression into a scala array, replacing missing values with a mean. returns false if every value is missing/NaN
     *
@@ -631,4 +469,180 @@ object GFisherDataPrep {
     return true
   }
 
+}
+
+
+object GFisherArrayToVectors {
+
+  // def oGFisherTups[T](vals: Array[T]): (BDV[Double], BDM[Int], BDM[Double], BDM[Double]) = {
+  //   vals match {
+  //     case a: Array[OGFisherTupleGeno] => oGFisherTupsGenoToVectors(vals)
+  //     case a: Array[OGFisherTupleCorr] => oGFisherTupsCorrToVectors(vals)
+  //     case _ => throw new IllegalArgumentException("Unknown type")
+  //   }
+  // }
+
+  def gFisherGeno(tups: Array[GFisherTupleGeno]): (BDV[Double], BDV[Int], BDV[Double], BDM[Double]) = {
+    require(tups.nonEmpty)
+    val g0 = tups(0).genoArr
+    // require(g0.offset == 0 && g0.stride == 1)
+    val n = g0.size
+    val m: Int = tups.length // number of rows that were put in this group
+
+    val pvalArr = new Array[Double](m)
+    val weightArr = new Array[Double](m)
+    val dfArr = new Array[Int](m)
+    // val corrArr = new Array[Double](m*n)
+
+    var i = 0
+    while (i < m) {
+      pvalArr(i) = tups(i).pval
+      dfArr(i) = tups(i).df
+      weightArr(i) = tups(i).weight
+      i += 1
+    }
+    i = 0
+
+    // fill in the correlation matrix
+    val genoArr = new Array[Double](n*m)
+    while (i < m) {
+      for (j <- (0 until n)) {
+        genoArr(i + j*m) = tups(i).genoArr(j)
+      }
+      i += 1
+    }
+    val genoMat = new BDM(m, n, genoArr)
+    val corrMat = rowCorrelation(genoMat)
+    return (BDV(pvalArr), BDV(dfArr), BDV(weightArr), corrMat)
+  }
+  /**
+    * Used to convert the iterable of rows in a group to a set of vectors and a matrix.
+    *
+    * @param tups array containing
+    */
+  def gFisherCorr(
+    tups: Array[GFisherTupleCorr]
+  ): (BDV[Double], BDV[Int], BDV[Double], BDM[Double]) = {
+    require(tups.nonEmpty)
+    // require(c0.offset == 0 && c0.stride == 1)
+    val m: Int = tups.length // number of rows that were put in this group
+
+    val rowIdxArr = new Array[Int](m)
+    val pvalArr = new Array[Double](m)
+    val weightArr = new Array[Double](m)
+    val dfArr = new Array[Int](m)
+
+    var i = 0
+    while (i < m) {
+      rowIdxArr(i) = tups(i).rowIdx
+      pvalArr(i) = tups(i).pval
+      dfArr(i) = tups(i).df
+      weightArr(i) = tups(i).weight
+      i += 1
+    }
+    i = 0
+    val corrArr = new Array[Double](m*m)
+    // fill in the correlation matrix
+    while (i < m) {
+      for (j <- (0 until m)) {
+        corrArr(i*m+j) = tups(i).corrArr(rowIdxArr(j))
+      }
+      i += 1
+    }
+    val corrMatrix = new BDM[Double](m, m, corrArr)
+    return (BDV(pvalArr), BDV(dfArr), BDV(weightArr), corrMatrix)
+  }
+
+
+
+  /**
+    * Used to convert the iterable of rows in a group to a set of vectors and matrices for OGFisher.
+    *
+    * @param tups array containing
+    */
+  def oGFisherCorr(
+    tups: Array[OGFisherTupleCorr],
+    nTests: Int
+  ): (BDV[Double], BDM[Int], BDM[Double], BDM[Double]) = {
+    require(tups.nonEmpty)
+    val m: Int = tups.length // number of rows that were put in this group
+    val rowIdxArr = new Array[Int](m)
+    val pvalArr = new Array[Double](m)
+    val dfArr = new Array[Int](m * nTests)
+    val weightArr = new Array[Double](m * nTests)
+
+    var i = 0
+    while (i < m) {
+      rowIdxArr(i) = tups(i).rowIdx
+      pvalArr(i) = tups(i).pval
+      if (tups(i).weight.length != nTests || tups(i).df.length != nTests)
+        fatal(s"Number of tests in each row must be the same. Either weights or degrees of freedom in a row were not equal to $nTests")
+      // again note that breeze matrices are column-major
+      System.arraycopy(tups(i).df, 0, dfArr, i*nTests, nTests)
+      System.arraycopy(tups(i).weight, 0, weightArr, i*nTests, nTests)
+      // System.arraycopy(tups(i)._5.data, 0, corrArr, i*n, n)
+      i += 1
+    }
+    i = 0
+    val corrArr = new Array[Double](m*m)
+
+    // important! breeze matrices are column-major, so we need to fill in the matrix by columns.
+    // this makes no difference for correlation matrices, but we do need to be careful for the df and weight matrices
+
+    // fill in the correlation matrix
+    while (i < m) {
+      for (j <- (0 until m)) {
+        corrArr(i*m+j) = tups(i).corrArr(rowIdxArr(j))
+      }
+      i += 1
+    }
+
+    val pval = new BDV(pvalArr)
+    // again note that breeze matrices are column-major
+    val df = new BDM[Int](nTests, m, dfArr)
+    val weight = new BDM[Double](nTests, m, weightArr)
+    val corr = new BDM[Double](m, m, corrArr)
+    return (pval, df, weight, corr)
+  }
+
+  def oGFisherGeno(
+    tups: Array[OGFisherTupleGeno],
+    nTests: Int
+  ): (BDV[Double], BDM[Int], BDM[Double], BDM[Double]) = {
+    require(tups.nonEmpty)
+    val m: Int = tups.length // number of rows that were put in this group
+    val pvalArr = new Array[Double](m)
+    val g0 = tups(0).genoArr
+    val n = g0.size // number of samples
+    var i = 0
+
+    // important! breeze matrices are column-major, so we need to fill in the matrix by columns.
+    // this makes no difference for correlation matrices, but we do need to be careful for the genotype, df, and weight matrices
+
+    val weightArr = new Array[Double](m * nTests)
+    val dfArr = new Array[Int](m * nTests)
+    // fill in the genotype matrix
+    val genoArr = new Array[Double](n*m)
+    while (i < m) {
+      pvalArr(i) = tups(i).pval
+      if (tups(i).weight.length != nTests || tups(i).df.length != nTests)
+        fatal(s"Number of tests in each row must be the same. Either weights or degrees of freedom in a row were not equal to $nTests")
+      // again note that breeze matrices are column-major
+      System.arraycopy(tups(i).df, 0, dfArr, i*nTests, nTests)
+      System.arraycopy(tups(i).weight, 0, weightArr, i*nTests, nTests)
+      for (j <- (0 until n)) {
+        genoArr(i + j*m) = tups(i).genoArr(j)
+      }
+      i += 1
+    }
+    i=0
+
+    val pval = new BDV(pvalArr)
+    // again note that breeze matrices are column-major
+    val df = new BDM[Int](nTests, m, dfArr)
+    val weight = new BDM[Double](nTests, m, weightArr)
+    val G = new BDM(m, n, genoArr)
+    val M = rowCorrelation(G)
+    return (pval, df, weight, M)
+  }
 }
