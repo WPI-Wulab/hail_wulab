@@ -28,12 +28,12 @@ object StatOGFisher {
     * Compute the oGFisher related statistics
     *
     * @param p a vector of input p-values of the oGFisher test
-    * @param DF matrix of degrees of freedom for inverse chi-square transformation for each p-value. 
-                Each row represents a GFisher test. 
+    * @param DF matrix of degrees of freedom for inverse chi-square transformation for each p-value.
+                Each row represents a GFisher test.
                 It allows a matrix of one column, indicating the same degrees of freedom for all p-values's chi-square transformations.
     * @param W matrix of non-negative weights. Each row represents a GFisher test.
     * @param M n by n correlation matrix of the input Zscores from which the input p-values were obtained.
-    * @param one_sided true = one-sided input p-values, false = two-sided input p-values
+    * @param oneSided true = one-sided input p-values, false = two-sided input p-values
     * @param method "MR" = simulation-assisted moment ratio matching
                     "HYB" = moment ratio matching by quadratic approximation
                     "GB" = Brown's method with calculated variance. See details in the reference
@@ -47,7 +47,7 @@ object StatOGFisher {
         DF: BDM[Int],
         W: BDM[Double],
         M: BDM[Double],
-        one_sided: Boolean = false,
+        oneSided: Boolean = false,
         method: String = "HYB",
         nsim: Option[Int] = None,
         seed: Option[Int] = None
@@ -57,8 +57,8 @@ object StatOGFisher {
         }.toArray
         val PVAL = STAT.zipWithIndex.map { case (stat, i) =>
             if (method == "HYB") PGFisher.pGFisherHyb(stat, DF(i, ::).t, W(i, ::).t, M)
-            else if (method == "MR") PGFisher.pGFisherMR(stat, DF(i, ::).t, W(i, ::).t, M)
-            else PGFisher.pGFisherGB(stat, DF(i, ::).t, W(i, ::).t, M)
+            else if (method == "MR") PGFisher.pGFisherMR(stat, DF(i, ::).t, W(i, ::).t, M, oneSided)
+            else PGFisher.pGFisherGB(stat, DF(i, ::).t, W(i, ::).t, M, oneSided)
         }
         val minp = PVAL.min
         val adjustedPVAL = BDV(PVAL.map(pval => if (pval > 0.9) 0.9 else pval))

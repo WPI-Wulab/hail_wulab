@@ -101,7 +101,7 @@ object PGFisher {
     * @param df n-dimensional vector of degrees of freedom
     * @param w n-dimensional vector of weights
     * @param M n by n correlation matrix
-    * @param one_sided true = one-sided input p-values, false = two-sided input p-values
+    * @param oneSided true = one-sided input p-values, false = two-sided input p-values
     * @param nsimOpt number of simulation used in the "MR" method for pGFisher, default = 5e4
     * @param seedOpt seed for random number generation, default = None
     * @return the p-value of the GFisher test
@@ -112,7 +112,7 @@ object PGFisher {
     df: BDV[Int],
     w: BDV[Double],
     M: BDM[Double],
-    one_sided: Boolean = false,
+    oneSided: Boolean,
     nsimOpt: Option[Int] = None,
     seedOpt: Option[Int] = None
   ) : Double = {
@@ -135,7 +135,7 @@ object PGFisher {
         BDM.rand(nsim, n, Gaussian(0.0, 1.0))
       }
       val znull = rand_mat * flipped
-      val pnull = if (one_sided) {
+      val pnull = if (oneSided) {
         znull.map(z => Normal.cumulative(z, 0.0, 1.0, true, false))
       } else {
         znull.map(z => 2 * Normal.cumulative(-math.abs(z), 0.0, 1.0, true, false))
@@ -169,16 +169,17 @@ object PGFisher {
     * @param df n-dimensional vector of degrees of freedom
     * @param w n-dimensional vector of weights
     * @param M n by n correlation matrix
-    * @param GM n by n correlation matrix between w_1 T_1, ..., w_n T_n, which is the output of getGFisherGM
+    * @param oneSided whether the p values are one sided
     */
   def pGFisherGB(
     q: Double,
     df: BDV[Int],
     w: BDV[Double],
-    M: BDM[Double]
+    M: BDM[Double],
+    oneSided: Boolean
   ): Double = {
     w := w / sum(w)
-    val GM: BDM[Double] = GFisherGM.getGFisherGM(df, w, M, false)
+    val GM: BDM[Double] = GFisherGM.getGFisherGM(df, w, M, oneSided)
     val mu: Double = w dot convert(df, Double)
     val sigma2: Double = sum(GM)
     val a: Double = math.pow(mu, 2.0) / sigma2
