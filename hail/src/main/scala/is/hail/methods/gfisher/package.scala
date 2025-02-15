@@ -71,7 +71,7 @@ package object gfisher {
     val rows = x.rows
     val cols = x.cols
     val colsD = cols.toDouble
-    val X = new BDM(rows, cols, x.data.clone())
+    val X = x.copy
     val res = BDM.eye[Double](rows)
     val sumSqrs = new Array[Double](rows)
     for (i <- 0 until rows) {
