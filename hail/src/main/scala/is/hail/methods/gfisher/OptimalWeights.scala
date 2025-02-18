@@ -301,7 +301,7 @@ object OptimalWeights {
     // val beta = lin_solve(XIntercept, y)
     // val yPred = (XIntercept * beta)
 
-    val yPred = lin_reg_predict(X, y, addIntercept=true, method="direct")
+    val yPred = lin_reg_predict(X, y, method="direct", addIntercept=true)
     val resids = y - yPred
 
     val sd = sqrt(sum((resids - mean(resids)) ^:^ 2.0) / (n - 1.0))

@@ -60,6 +60,38 @@ package object gfisher {
     return res
   }
 
+  def colCorrelation(x: BDM[Double]): BDM[Double] = {
+    val rows = x.rows
+    val cols = x.cols
+    val colsD = cols.toDouble
+    val X = new BDM(rows, cols, x.data.clone())
+    val res = BDM.eye[Double](cols)
+    val sumSqrs = new Array[Double](cols)
+    for (i <- 0 until cols) {
+      var sum = 0.0
+      for (j <- 0 until rows)
+        sum += X(j,i)
+      val mean = sum / rows.toDouble
+      var sumSqr = 0.0
+      for (j <- 0 until rows) {
+        X(j,i) = X(j,i) - mean
+        sumSqr += math.pow(X(j,i), 2.0)
+      }
+      sumSqrs(i) = math.sqrt(sumSqr)
+    }
+    for (i <- 0 until cols) {
+      for (j <- (i+1) until cols) {
+        var numerator = 0.0
+        for (k <- 0 until rows)
+          numerator += X(k, i) * X(k, j)
+        val denom = sumSqrs(i) * sumSqrs(j)
+        res(i,j) = numerator / denom
+        res(j,i) = res(i,j)
+      }
+    }
+    return res
+  }
+
   /**
     * Calculate Pearson's correlation coefficient between the rows of a matrix
     *
@@ -134,7 +166,7 @@ package object gfisher {
     * "breeze" simply does `X \ y`. "naive" uses the closed form equation for OLS, `inv(X.t * X) * X.t * y`
     *
     */
-  def lin_reg_predict(x: BDM[Double], y: BDV[Double], addIntercept: Boolean = true, method:String = "direct"): BDV[Double] = {
+  def lin_reg_predict(x: BDM[Double], y: BDV[Double], method: String = "direct", addIntercept: Boolean = true): BDV[Double] = {
     val X = if (addIntercept) {
       BDM.horzcat(BDM.ones[Double](x.rows, 1), x)
     } else {
@@ -176,6 +208,18 @@ package object gfisher {
       case _ => throw new IllegalArgumentException(s"unknown method: $method")
     }
   }
+
+  def stdErrLinearRegression3(X: BDM[Double], y: BDV[Double]): BDV[Double] = {
+    val QR = qr.reduced(X)
+    val yhat = QR.q * QR.q.t * y
+    val residuals: BDV[Double] = y - yhat
+    val sigma2: Double = (residuals dot residuals) / (X.rows - X.cols)
+    val se: BDV[Double] = sqrt(diag(inv(QR.r.t * QR.r)) * sigma2)
+    return se
+  }
+
+
+
 
   /**
     * fit coefficients for a logistic regression model

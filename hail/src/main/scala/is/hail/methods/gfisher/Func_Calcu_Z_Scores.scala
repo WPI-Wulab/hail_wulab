@@ -104,7 +104,7 @@ object FuncCalcuZScores {
         val GHalf = G.t * Hhalf
         val GHG = G.t * G - GHalf * GHalf.t
         val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
-        val Y_hat = lin_reg_predict(XWithIntercept, Y, addIntercept=false, method="direct")
+        val Y_hat = lin_reg_predict(XWithIntercept, Y, method="direct", addIntercept=false)
         // Compute residuals
         val res = Y - Y_hat
         // estimate of the sd of error based on the null model
