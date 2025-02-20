@@ -28,6 +28,12 @@ package object gfisher {
     return true
   }
 
+  /**
+    * Calculate Pearson's correlation coefficient between two vectors
+    *
+    * @param x
+    * @param y
+    */
   def cor(x: BDV[Double], y: BDV[Double]): Double = {
     val n = x.length
     val mx = sum(x) / n.toDouble
@@ -37,6 +43,7 @@ package object gfisher {
     return (xmx dot ymy) / sqrt(xmx dot xmx) / sqrt(ymy dot ymy)
   }
 
+  // this function is not correct and should not be used
   def rowCorBad(X: BDM[Double]): BDM[Double] = {
     val rows = X.rows
     val rowsD = rows.toDouble
@@ -138,6 +145,11 @@ package object gfisher {
     return res
   }
 
+  /**
+    * This function is slower than the one above.
+    *
+    * @param X
+    */
   def rowCorrelationSlow(X: BDM[Double]): BDM[Double] = {
     val rows = X.rows
     val cols = X.cols
