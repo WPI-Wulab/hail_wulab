@@ -60,11 +60,18 @@ package object gfisher {
     return res
   }
 
+  /**
+    * Calculate Pearson's correlation coefficient between the columns of a matrix
+    *
+    * Creates a copy of the matrix to avoid modifying it.
+    *
+    * @param x matrix
+    */
   def colCorrelation(x: BDM[Double]): BDM[Double] = {
     val rows = x.rows
     val cols = x.cols
     val colsD = cols.toDouble
-    val X = new BDM(rows, cols, x.data.clone())
+    val X = x.copy
     val res = BDM.eye[Double](cols)
     val sumSqrs = new Array[Double](cols)
     for (i <- 0 until cols) {
