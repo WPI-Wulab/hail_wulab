@@ -3144,8 +3144,9 @@ def gfisher(key, pval, df, w, genotype=None, corr=None, corr_idx=None, method="H
         pval (expr_float64): row expression of p-values
         df (expr_int32): row expression of degrees of freedom
         w (expr_float64): row expression of weights
-        corr (expr_array): row expression containing rows of the correlation matrix (contains the row of the correlation matrix corresponding to this row's SNP)
-        corr_idx (expr_int32): row expression containing the index this row corresponds to in the original correlation matrix.
+        genotype (expr_float64, optional): entry expression to calculate correlation of. If not specified, corr and corr_idx must be specified.
+        corr (expr_array, optional): row expression containing rows of the correlation matrix (contains the row of the correlation matrix corresponding to this row's SNP). Requires corr_idx. If not specified, genotype must be specified.
+        corr_idx (expr_int32): row expression containing the index this row corresponds to in the original correlation matrix. If not specified, genotype must be specified.
         method (str, optional): which method to use. Either "HYB" (default) for moment ratio matching by quadratic approximation, "MR" for simulation-assisted moment ratio matching, or "GB" for Brown's method with calculated variance.
         one_sided (bool, optional): whether the input p-values were one-sided or not. Defaults to False.
 
