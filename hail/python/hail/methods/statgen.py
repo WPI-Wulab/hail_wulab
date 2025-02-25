@@ -3151,7 +3151,7 @@ def gfisher(key, pval, df, w, genotype=None, corr=None, corr_idx=None, method="H
         one_sided (bool, optional): whether the input p-values were one-sided or not. Defaults to False.
 
     Returns:
-        hl.Table: table containing the GFisher statistic and
+        hl.Table: table containing the GFisher statistic, pvalue, and the number of rows used in the group
 
     Examples:
     ```python
@@ -3241,7 +3241,7 @@ def ogfisher(key, pval, df, w, n_tests, genotype=None, corr=None, corr_idx=None,
         one_sided (bool, optional): whether the input p-values were one-sided or not. Defaults to False.
 
     Returns:
-        hl.Table: table containing the GFisher statistic and
+        hl.Table: table containing the OGFisher statistic, p-value, and the number of rows used in the group
 
     Examples:
     ```python

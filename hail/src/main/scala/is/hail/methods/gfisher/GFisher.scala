@@ -8,7 +8,7 @@ import is.hail.expr.ir.{MatrixValue, TableValue}
 
 import is.hail.expr.ir.functions.MatrixToTableFunction
 
-import is.hail.types.virtual.{MatrixType, TFloat64, TStruct, TableType, TArray}
+import is.hail.types.virtual.{MatrixType, TFloat64, TStruct, TableType, TArray, TInt32}
 
 import is.hail.utils._
 
@@ -60,6 +60,7 @@ case class GFisher(
     val keyType = childType.rowType.fieldType(keyField)
     val mySchema = TStruct(
       (keyFieldOut, keyType),
+      ("n", TInt32),
       ("stat", TFloat64),
       ("p_value", TFloat64)
     )
@@ -79,7 +80,7 @@ case class GFisher(
         val gFishPVal: Double = if (method == "HYB") PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
                                 else if (method == "MR") PGFisher.pGFisherMR(gFishStat, df, w, corrMat, oneSided)
                                 else PGFisher.pGFisherGB(gFishStat, df, w, corrMat, oneSided)
-        Row(key, gFishStat, gFishPVal)
+        Row(key, valArr.length, gFishStat, gFishPVal)
       }
       newrdd
     }
@@ -93,7 +94,7 @@ case class GFisher(
         val gFishPVal: Double = if (method == "HYB") PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
                                 else if (method == "MR") PGFisher.pGFisherMR(gFishStat, df, w, corrMat, oneSided)
                                 else PGFisher.pGFisherGB(gFishStat, df, w, corrMat, oneSided)
-        Row(key, gFishStat, gFishPVal)
+        Row(key, valArr.length, gFishStat, gFishPVal)
       }
       newrdd
     }
@@ -144,6 +145,7 @@ case class OGFisher(
     // println(arrayType)
     val mySchema = TStruct(
       (keyFieldOut, keyType),
+      ("n", TInt32),
       ("stat", TFloat64),
       ("p_value", TFloat64),
       ("stat_ind", TArray(TFloat64)),
@@ -164,6 +166,7 @@ case class OGFisher(
         val (pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.oGFisherGeno(valArr, nTests)
         val res = PvalOGFisher.pvalOGFisher(pvals, df, w, corrMat, method = method)
         Row(key,
+          valArr.length,
           res("stat"),
           res("pval"),
           res("stat_indi").asInstanceOf[BDV[Double]].toArray.toFastSeq,
@@ -183,6 +186,7 @@ case class OGFisher(
         val (pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.oGFisherCorr(valArr, nTests)
         val res = PvalOGFisher.pvalOGFisher(pvals, df, w, corrMat, method = method)
         Row(key,
+          valArr.length,
           res("stat"),
           res("pval"),
           res("stat_indi").asInstanceOf[BDV[Double]].toArray.toFastSeq,

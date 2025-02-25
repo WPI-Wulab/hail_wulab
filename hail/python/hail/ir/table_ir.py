@@ -1047,13 +1047,13 @@ class MatrixToTableApply(TableIR):
         elif name == "GFisher":
             key_field_out = self.config['keyFieldOut']
             key_type = child_typ.row_type[self.config['keyField']]
-            my_type = hl.dtype(f'struct{{{key_field_out}:{key_type},stat:float64,p_value:float64}}')
+            my_type = hl.dtype(f'struct{{{key_field_out}:{key_type},n:int32,stat:float64,p_value:float64}}')
             return hl.ttable(hl.tstruct(), my_type, [key_field_out])
         elif name == "OGFisher":
             key_field_out = self.config['keyFieldOut']
             key_type = child_typ.row_type[self.config['keyField']]
             my_type = hl.dtype(
-                f'struct{{{key_field_out}:{key_type},stat_ind:array<float64>,p_value_ind:array<float64>,stat:float64,p_value:float64}}'
+                f'struct{{{key_field_out}:{key_type},n:int32,stat_ind:array<float64>,p_value_ind:array<float64>,stat:float64,p_value:float64}}'
             )
             return hl.ttable(hl.tstruct(), my_type, [key_field_out])
         else:
