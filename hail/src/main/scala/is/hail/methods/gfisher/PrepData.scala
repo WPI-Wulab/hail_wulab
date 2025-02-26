@@ -22,6 +22,7 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 
 abstract class GFisherTuple(pval: Double)
 
+//[ZWu: df can be non-integer, and we should keep this generality. See the R function pchisq.]
 case class GFisherTupleCorr(rowIdx: Int, pval: Double, df: Int, weight: Double, corrArr: Array[Double]) extends GFisherTuple(pval)
 
 case class GFisherTupleGeno(pval: Double, df: Int, weight: Double, genoArr: Array[Double]) extends GFisherTuple(pval)
@@ -114,7 +115,7 @@ abstract class GRowProcessorEntry(
 
     val data = new Array[Double](n)// array that will hold the genotype data
 
-    // get the correlation values and make sure they aren't all missing/NaN
+    // get the genotype values and make sure they aren't all missing/NaN
     RegressionUtils.setMeanImputedDoubles(
       data,
       0,
@@ -286,7 +287,7 @@ object GFisherDataPrep {
 
         //check fields defined
         val fieldsDefined = rowProcessor.checkFieldsDefined
-        if (fieldsDefined) {
+        if (fieldsDefined) { {//[Wu: What is the code logic here? It reads like it returns None if fields are defined, but it should return None if fields are not defined.]
           None
         }
 
@@ -365,7 +366,7 @@ object GFisherDataPrep {
     /**
     * Collects values from a row-indexed hail array expression into a scala array, replacing missing values with a mean. returns false if every value is missing/NaN
     *
-    * This function is used to collect the correlation values from the correlation array field in the hail MatrixTable.
+    * This function can be used to collect the correlation values from the correlation array field in the hail MatrixTable.
     *
     * @param data array to fill
     * @param ptr pointer created in MatrixValue.rvd.mapPartitions.flatMat
@@ -503,7 +504,7 @@ object GFisherArrayToVectors {
     }
     i = 0
 
-    // fill in the correlation matrix
+    // fill in the genotype matrix
     val genoArr = new Array[Double](n*m)
     while (i < m) {
       for (j <- (0 until n)) {

@@ -22,7 +22,7 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
   *     - to update the schema of the return type
   *   - hail/python/hail/methods/statgen.py
   *     - make python function, make correct config dictionary
-  *   - hail/python/hail/__init__.py
+  *   - hail/python/hail/methods/__init__.py
   *     - import and the function in statgen, and put it in __all__
   *   - hail/src/main/scala/is/hail/expr/ir/functions/RelationalFunctions.scala
   *     - import it and add a line with classOf[<YourClass>] to the list

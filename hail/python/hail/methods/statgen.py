@@ -2874,7 +2874,7 @@ def _logistic_skat(
 def skat(
     key_expr,
     weight_expr,
-    y,
+    y,  ##[ZWu: When implementing GLOW pipeline for genotype-phenotype data, we can use the similar python function/interface setting, including y, x, covariates, logistic.]
     x,
     covariates,
     logistic: Union[bool, Tuple[int, float]] = False,
@@ -3132,7 +3132,9 @@ def simple_group_sum(key_expr, x) -> Table:
     w=expr_float64,
     genotype=nullable(expr_float64),
     corr=nullable(expr_array(expr_float64)),
-    corr_idx=nullable(expr_oneof(expr_int32, expr_int64)),
+    corr_idx=nullable(
+        expr_oneof(expr_int32, expr_int64)
+    ),  # Upstream results obtained by Hail's functions could be int32 or int64.
     method=str,
     one_sided=bool,
 )
@@ -3215,6 +3217,9 @@ def gfisher(key, pval, df, w, genotype=None, corr=None, corr_idx=None, method="H
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 
 
+# [ZWu: gfisher and ogfisher are similar procedure. Would it be better to combine them?]
+
+
 @typecheck(
     key=expr_any,
     pval=expr_float64,
@@ -3235,6 +3240,7 @@ def ogfisher(key, pval, df, w, n_tests, genotype=None, corr=None, corr_idx=None,
         pval (expr_float64): row expression of p-values
         df (expr_array(expr_int32)): row expression of degrees of freedom. Each element of the array corresponds to a GFisher test
         w (expr_array(expr_float64)): row expression of weights. Each element of the array corresponds to a GFisher test
+        genotype (expr_float64, optional): entry expression to calculate correlation of. If not specified, corr and corr_idx must be specified.
         corr (expr_array): row expression containing rows of the correlation matrix (contains the row of the correlation matrix corresponding to this row's SNP)
         corr_idx (expr_int32): row expression containing the index this row corresponds to in the original correlation matrix.
         method (str, optional): which method to use. Either "HYB" (default) for moment ratio matching by quadratic approximation, "MR" for simulation-assisted moment ratio matching, or "GB" for Brown's method with calculated variance.
