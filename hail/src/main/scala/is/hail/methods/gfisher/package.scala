@@ -77,7 +77,7 @@ package object gfisher {
   def colCorrelation(x: BDM[Double]): BDM[Double] = {
     val rows = x.rows
     val cols = x.cols
-    val colsD = cols.toDouble
+    val rowsD = rows.toDouble
     val X = x.copy
     val res = BDM.eye[Double](cols)
     val sumSqrs = new Array[Double](cols)
@@ -85,7 +85,7 @@ package object gfisher {
       var sum = 0.0
       for (j <- 0 until rows)
         sum += X(j,i)
-      val mean = sum / rows.toDouble
+      val mean = sum / rowsD
       var sumSqr = 0.0
       for (j <- 0 until rows) {
         X(j,i) = X(j,i) - mean
