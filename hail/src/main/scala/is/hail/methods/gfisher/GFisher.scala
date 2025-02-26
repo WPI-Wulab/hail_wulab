@@ -75,7 +75,7 @@ case class GFisher(
       val newrdd = groupedRDD.map{case(key, vals) =>
         val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
-        val (pvals: BDV[Double], df: BDV[Int], w: BDV[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.gFisherGeno(valArr)
+        val (pvals: BDV[Double], df: BDV[Double], w: BDV[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.gFisherGeno(valArr)
         val gFishStat: Double = StatGFisher.statGFisher(pvals, df, w)
         val gFishPVal: Double = if (method == "HYB") PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
                                 else if (method == "MR") PGFisher.pGFisherMR(gFishStat, df, w, corrMat, oneSided)
@@ -89,7 +89,7 @@ case class GFisher(
       val newrdd = groupedRDD.map{case(key, vals) =>
         val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
-        val (pvals: BDV[Double], df: BDV[Int], w: BDV[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.gFisherCorr(valArr)
+        val (pvals: BDV[Double], df: BDV[Double], w: BDV[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.gFisherCorr(valArr)
         val gFishStat: Double = StatGFisher.statGFisher(pvals, df, w)
         val gFishPVal: Double = if (method == "HYB") PGFisher.pGFisherHyb(gFishStat, df, w, corrMat)
                                 else if (method == "MR") PGFisher.pGFisherMR(gFishStat, df, w, corrMat, oneSided)
@@ -163,7 +163,7 @@ case class OGFisher(
       val newrdd = groupedRDD.map{case(key, vals) =>
         val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
-        val (pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.oGFisherGeno(valArr, nTests)
+        val (pvals: BDV[Double], df: BDM[Double], w: BDM[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.oGFisherGeno(valArr, nTests)
         val res = PvalOGFisher.pvalOGFisher(pvals, df, w, corrMat, method = method)
         Row(key,
           valArr.length,
@@ -183,7 +183,7 @@ case class OGFisher(
       val newrdd = groupedRDD.map{case(key, vals) =>
         val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
 
-        val (pvals: BDV[Double], df: BDM[Int], w: BDM[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.oGFisherCorr(valArr, nTests)
+        val (pvals: BDV[Double], df: BDM[Double], w: BDM[Double], corrMat: BDM[Double]) = GFisherArrayToVectors.oGFisherCorr(valArr, nTests)
         val res = PvalOGFisher.pvalOGFisher(pvals, df, w, corrMat, method = method)
         Row(key,
           valArr.length,

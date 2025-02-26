@@ -23,13 +23,13 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 abstract class GFisherTuple(pval: Double)
 
 //[ZWu: df can be non-integer, and we should keep this generality. See the R function pchisq.]
-case class GFisherTupleCorr(rowIdx: Int, pval: Double, df: Int, weight: Double, corrArr: Array[Double]) extends GFisherTuple(pval)
+case class GFisherTupleCorr(rowIdx: Int, pval: Double, df: Double, weight: Double, corrArr: Array[Double]) extends GFisherTuple(pval)
 
-case class GFisherTupleGeno(pval: Double, df: Int, weight: Double, genoArr: Array[Double]) extends GFisherTuple(pval)
+case class GFisherTupleGeno(pval: Double, df: Double, weight: Double, genoArr: Array[Double]) extends GFisherTuple(pval)
 
-case class OGFisherTupleCorr(rowIdx: Int, pval: Double, df: Array[Int], weight: Array[Double], corrArr: Array[Double]) extends GFisherTuple(pval)
+case class OGFisherTupleCorr(rowIdx: Int, pval: Double, df: Array[Double], weight: Array[Double], corrArr: Array[Double]) extends GFisherTuple(pval)
 
-case class OGFisherTupleGeno(pval: Double, df: Array[Int], weight: Array[Double], genoArr: Array[Double]) extends GFisherTuple(pval)
+case class OGFisherTupleGeno(pval: Double, df: Array[Double], weight: Array[Double], genoArr: Array[Double]) extends GFisherTuple(pval)
 
 trait FieldIndexes{
   def key: Int
@@ -98,8 +98,6 @@ abstract class GRowProcessor(
     return data
   }
 
-
-
   def getData(ctx: RVDContext): Option[(Annotation, GFisherTuple)]
 }
 
@@ -148,7 +146,7 @@ class GFisherCorrRowProcessor(
     val key = getKey(ctx)
     val rowIdx = getInt(fieldIds.rowIdx)
     val pval = getDouble(fieldIds.pval)
-    val df = getInt(fieldIds.df)
+    val df = getDouble(fieldIds.df)
     val weight = getDouble(fieldIds.weight)
     val corrArr = getDoubleArray(fieldIds.corrArr)
     if (all(corrArr, (i: Double) => i == 0.0))
@@ -169,7 +167,7 @@ class GFisherGenoRowProcessor(
   override def getData(ctx: RVDContext): Option[(Annotation, GFisherTupleGeno)] = {
     val key = getKey(ctx)
     val pval = getDouble(fieldIds.pval)
-    val df = getInt(fieldIds.df)
+    val df = getDouble(fieldIds.df)
     val weight = getDouble(fieldIds.weight)
     val genoArr = getEntryArray(fieldIds.geno, fieldIds.entryArray, nCols)
     if (genoArr.distinct.length == 1)
@@ -196,7 +194,7 @@ class OGFisherCorrRowProcessor(
     val key = getKey(ctx)
     val rowIdx = getInt(fieldIds.rowIdx)
     val pval = getDouble(fieldIds.pval)
-    val df = getIntArray(fieldIds.df)
+    val df = getDoubleArray(fieldIds.df)
     val weight = getDoubleArray(fieldIds.weight)
     val corrArr = getDoubleArray(fieldIds.corrArr)
     if (all(corrArr, (i: Double) => i == 0.0))
@@ -218,7 +216,7 @@ class OGFisherGenoRowProcessor(
   override def getData(ctx: RVDContext): Option[(Annotation, OGFisherTupleGeno)] = {
     val key = getKey(ctx)
     val pval = getDouble(fieldIds.pval)
-    val df = getIntArray(fieldIds.df)
+    val df = getDoubleArray(fieldIds.df)
     val weight = getDoubleArray(fieldIds.weight)
     val genoArr = getEntryArray(fieldIds.geno, fieldIds.entryArray, nCols)
     if (genoArr.distinct.length == 1)
@@ -287,7 +285,7 @@ object GFisherDataPrep {
 
         //check fields defined
         val fieldsDefined = rowProcessor.checkFieldsDefined
-        if (fieldsDefined) { {//[Wu: What is the code logic here? It reads like it returns None if fields are defined, but it should return None if fields are not defined.]
+        if (fieldsDefined) {//[Wu: What is the code logic here? It reads like it returns None if fields are defined, but it should return None if fields are not defined.]
           None
         }
 
@@ -483,7 +481,7 @@ object GFisherArrayToVectors {
   //   }
   // }
 
-  def gFisherGeno(tups: Array[GFisherTupleGeno]): (BDV[Double], BDV[Int], BDV[Double], BDM[Double]) = {
+  def gFisherGeno(tups: Array[GFisherTupleGeno]): (BDV[Double], BDV[Double], BDV[Double], BDM[Double]) = {
     require(tups.nonEmpty)
     val g0 = tups(0).genoArr
     // require(g0.offset == 0 && g0.stride == 1)
@@ -492,7 +490,7 @@ object GFisherArrayToVectors {
 
     val pvalArr = new Array[Double](m)
     val weightArr = new Array[Double](m)
-    val dfArr = new Array[Int](m)
+    val dfArr = new Array[Double](m)
     // val corrArr = new Array[Double](m*n)
 
     var i = 0
@@ -523,7 +521,7 @@ object GFisherArrayToVectors {
     */
   def gFisherCorr(
     tups: Array[GFisherTupleCorr]
-  ): (BDV[Double], BDV[Int], BDV[Double], BDM[Double]) = {
+  ): (BDV[Double], BDV[Double], BDV[Double], BDM[Double]) = {
     require(tups.nonEmpty)
     // require(c0.offset == 0 && c0.stride == 1)
     val m: Int = tups.length // number of rows that were put in this group
@@ -531,7 +529,7 @@ object GFisherArrayToVectors {
     val rowIdxArr = new Array[Int](m)
     val pvalArr = new Array[Double](m)
     val weightArr = new Array[Double](m)
-    val dfArr = new Array[Int](m)
+    val dfArr = new Array[Double](m)
 
     var i = 0
     while (i < m) {
@@ -564,12 +562,12 @@ object GFisherArrayToVectors {
   def oGFisherCorr(
     tups: Array[OGFisherTupleCorr],
     nTests: Int
-  ): (BDV[Double], BDM[Int], BDM[Double], BDM[Double]) = {
+  ): (BDV[Double], BDM[Double], BDM[Double], BDM[Double]) = {
     require(tups.nonEmpty)
     val m: Int = tups.length // number of rows that were put in this group
     val rowIdxArr = new Array[Int](m)
     val pvalArr = new Array[Double](m)
-    val dfArr = new Array[Int](m * nTests)
+    val dfArr = new Array[Double](m * nTests)
     val weightArr = new Array[Double](m * nTests)
 
     var i = 0
@@ -600,7 +598,7 @@ object GFisherArrayToVectors {
 
     val pval = new BDV(pvalArr)
     // again note that breeze matrices are column-major
-    val df = new BDM[Int](nTests, m, dfArr)
+    val df = new BDM[Double](nTests, m, dfArr)
     val weight = new BDM[Double](nTests, m, weightArr)
     val corr = new BDM[Double](m, m, corrArr)
     return (pval, df, weight, corr)
@@ -609,7 +607,7 @@ object GFisherArrayToVectors {
   def oGFisherGeno(
     tups: Array[OGFisherTupleGeno],
     nTests: Int
-  ): (BDV[Double], BDM[Int], BDM[Double], BDM[Double]) = {
+  ): (BDV[Double], BDM[Double], BDM[Double], BDM[Double]) = {
     require(tups.nonEmpty)
     val m: Int = tups.length // number of rows that were put in this group
     val pvalArr = new Array[Double](m)
@@ -621,7 +619,7 @@ object GFisherArrayToVectors {
     // this makes no difference for correlation matrices, but we do need to be careful for the genotype, df, and weight matrices
 
     val weightArr = new Array[Double](m * nTests)
-    val dfArr = new Array[Int](m * nTests)
+    val dfArr = new Array[Double](m * nTests)
     // fill in the genotype matrix
     val genoArr = new Array[Double](n*m)
     while (i < m) {
@@ -640,7 +638,7 @@ object GFisherArrayToVectors {
 
     val pval = new BDV(pvalArr)
     // again note that breeze matrices are column-major
-    val df = new BDM[Int](nTests, m, dfArr)
+    val df = new BDM[Double](nTests, m, dfArr)
     val weight = new BDM[Double](nTests, m, weightArr)
     val G = new BDM(m, n, genoArr)
     val M = rowCorrelation(G)

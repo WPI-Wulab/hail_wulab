@@ -15,7 +15,7 @@ object StatGFisher {
     */
   def statGFisher(
     p: BDV[Double],
-    df: BDV[Int],
+    df: BDV[Double],
     w: BDV[Double],
   ): Double = {
     // transformed p values

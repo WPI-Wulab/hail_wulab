@@ -12,7 +12,7 @@ object ExampleObject {
   def main(args: Array[String]): Unit = {
     // insert code you want to run here
     val p = DenseVector(0.04, 0.01)
-    val df = DenseVector(2, 2)
+    val df = DenseVector(2.0, 2.0)
     val w = DenseVector(0.7, 0.3)
     val result = StatGFisher.statGFisher(p, df, w)
     println(result)

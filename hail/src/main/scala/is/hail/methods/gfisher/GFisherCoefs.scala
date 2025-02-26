@@ -17,7 +17,7 @@ object GFisherCoefs {
     * @param df degrees of freedom
     * @param deg hermite polynomial degree
     */
-  def f_to_integrate_two(x:Double, df:Int, deg: Int): Double = {
+  def f_to_integrate_two(x:Double, df:Double, deg: Int): Double = {
     ChiSquare.quantile(ChiSquare.cumulative(x*x, 1, true, false), df, true, false) * Normal.density(x, 0, 1.0, false) * hermite_scalar(x, deg)
   }
 
@@ -28,7 +28,7 @@ object GFisherCoefs {
     * @param df degrees of freedom
     * @param deg hermite polynomial degree
     */
-  def f_to_integrate_one(x:Double, df:Int, deg: Int): Double = {
+  def f_to_integrate_one(x:Double, df:Double, deg: Int): Double = {
     ChiSquare.quantile(Normal.cumulative(x, 0, 1), df, true, false) * Normal.density(x, 0, 1.0, false) * hermite_scalar(x, deg)
   }
 
@@ -38,7 +38,7 @@ object GFisherCoefs {
     * @param df vector of degrees of freedom
     * @return 4 coefficient vectors, each the same length as `df`
     */
-  def getGFisherCoefs1(df: BDV[Int]): (BDV[Double], BDV[Double], BDV[Double], BDV[Double]) = {
+  def getGFisherCoefs1(df: BDV[Double]): (BDV[Double], BDV[Double], BDV[Double], BDV[Double]) = {
     val degs = Array(1,2,3,4)
     val dfUnique = df.data.distinct
     val integrator = new GaussKronrod(1e-8, 100)
@@ -59,7 +59,7 @@ object GFisherCoefs {
     * @param df vector of degrees of freedom
     * @return 4 coefficient vectors, each the same length as `df`
     */
-  def getGFisherCoefs2(df: BDV[Int]): (BDV[Double], BDV[Double], BDV[Double], BDV[Double]) = {
+  def getGFisherCoefs2(df: BDV[Double]): (BDV[Double], BDV[Double], BDV[Double], BDV[Double]) = {
     val degs = Array(2,4,6,8)
     val dfUnique = df.data.distinct
     val integrator = new GaussKronrod(1e-8, 100)
@@ -83,7 +83,7 @@ object GFisherCoefs {
     * @return
     */
   def getGFisherCoefs(
-    df: BDV[Int],
+    df: BDV[Double],
     one_sided:Boolean = false,
   ): (BDV[Double], BDV[Double],BDV[Double],BDV[Double]) = {
     if (one_sided) return getGFisherCoefs1(df)

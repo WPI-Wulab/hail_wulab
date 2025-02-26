@@ -297,7 +297,7 @@ package object gfisher {
     * @param x
     * @param df
     */
-  def gGFisher2(x: Double, df: Int=2): Double = {
+  def gGFisher2(x: Double, df: Double=2.0): Double = {
     return ChiSquare.quantile(
       math.log(2.0) +
       Normal.cumulative(

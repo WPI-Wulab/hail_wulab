@@ -3128,7 +3128,7 @@ def simple_group_sum(key_expr, x) -> Table:
 @typecheck(
     key=expr_any,
     pval=expr_float64,
-    df=expr_int32,
+    df=expr_oneof(expr_int32, expr_int64, expr_float64),
     w=expr_float64,
     genotype=nullable(expr_float64),
     corr=nullable(expr_array(expr_float64)),
@@ -3177,6 +3177,7 @@ def gfisher(key, pval, df, w, genotype=None, corr=None, corr_idx=None, method="H
     # FIXME: remove this logic when annotation is better optimized (taken from line 3050 of skat function)
     # used to name group column in the output table to what it was in the input. Logic taken from line 3050 of skat function
     key_name_out = mt._fields_inverse[key] if key in mt._fields_inverse else "id"
+    df = hl.float64(df)
     row_exprs = {'__key': key, '__pvalue': pval, '__weight': w, '__df': df}
 
     if use_genotype:
@@ -3223,7 +3224,7 @@ def gfisher(key, pval, df, w, genotype=None, corr=None, corr_idx=None, method="H
 @typecheck(
     key=expr_any,
     pval=expr_float64,
-    df=expr_array(expr_int32),
+    df=expr_array(expr_oneof(expr_int32, expr_int64, expr_float64)),
     w=expr_array(expr_float64),
     genotype=nullable(expr_float64),
     corr=nullable(expr_array(expr_float64)),
@@ -3271,6 +3272,7 @@ def ogfisher(key, pval, df, w, n_tests, genotype=None, corr=None, corr_idx=None,
     # FIXME: remove this logic when annotation is better optimized (taken from line 3050 of skat function)
     # used to name group column in the output table to what it was in the input. Logic taken from line 3050 of skat function
     key_name_out = mt._fields_inverse[key] if key in mt._fields_inverse else "id"
+    df = df.map(lambda x: hl.float64(x))
     row_exprs = {'__key': key, '__pvalue': pval, '__weight': w, '__df': df}
 
     if use_genotype:

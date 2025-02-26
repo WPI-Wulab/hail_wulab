@@ -4,6 +4,7 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
 Creators: Peter Howell and Kylie Hoar
 Last update (latest update first):
+  PHowell 2025-02-26: Allow double degrees of freedom
   KHoar 2024-11-30: sample format for future edits
 */
 
@@ -77,7 +78,7 @@ object PGFisher {
     */
   def pGFisherHyb(
     q: Double,
-    df: BDV[Int],
+    df: BDV[Double],
     w: BDV[Double],
     M: BDM[Double]
   ): Double = {
@@ -109,7 +110,7 @@ object PGFisher {
     */
   def pGFisherMR(
     q: Double,
-    df: BDV[Int],
+    df: BDV[Double],
     w: BDV[Double],
     M: BDM[Double],
     oneSided: Boolean,
@@ -173,7 +174,7 @@ object PGFisher {
     */
   def pGFisherGB(
     q: Double,
-    df: BDV[Int],
+    df: BDV[Double],
     w: BDV[Double],
     M: BDM[Double],
     oneSided: Boolean

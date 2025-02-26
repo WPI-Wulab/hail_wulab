@@ -44,7 +44,7 @@ object StatOGFisher {
     */
     def statOGFisher(
         p: BDV[Double],
-        DF: BDM[Int],
+        DF: BDM[Double],
         W: BDM[Double],
         M: BDM[Double],
         oneSided: Boolean = false,

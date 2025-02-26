@@ -1,9 +1,10 @@
 /*
 This file contains main and supportive functions for computing a GFisher correlation matrix
-Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value 
+Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
 Creators: Kylie Hoar
-Last update (latest update first): 
+Last update (latest update first):
+  PHowell 2025-02-26: Allow double degrees of freedom
   KHoar 2024-11-30: sample format for future edits
 */
 
@@ -23,7 +24,7 @@ object GFisherCor {
     * @param one_sided true = one-sided input p-values, false = two-sided input p-values.
     * @return a correlation matrix between T(1), T(2),..., T(m) as calculated in Corollary 2.
     */
-  def getGFisherCor(DD: BDM[Int], W: BDM[Double], M: BDM[Double], varCorrect: Boolean = true, one_sided: Boolean = false): BDM[Double] = {
+  def getGFisherCor(DD: BDM[Double], W: BDM[Double], M: BDM[Double], varCorrect: Boolean = true, one_sided: Boolean = false): BDM[Double] = {
     val m = DD.rows
     val COV = BDM.fill[Double](m, m)(Double.NaN)
     for (i <- 0 until m) {
