@@ -4,7 +4,7 @@ import is.hail.stats.eigSymD
 import is.hail.utils.fatal
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
-import breeze.numerics.{abs, sqrt, sigmoid}
+import breeze.numerics._
 import breeze.optimize.{DiffFunction, minimize}
 import net.sourceforge.jdistlib.{ChiSquare, Normal}
 import is.hail.types.physical.PStruct
@@ -238,6 +238,46 @@ package object gfisher {
   }
 
 
+  def lasso_log_reg_fit(
+      X: BDM[Double],
+      y: BDV[Double],
+      lambda: Double, // Regularization parameter
+      addIntercept: Boolean = false
+  ): BDV[Double] = {
+
+    // Add intercept term by appending a column of ones to X
+    val XWithIntercept = if (addIntercept) {
+      BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+    } else X
+
+    // Define the regularized negative log-likelihood function and its gradient
+    val logisticLoss = new DiffFunction[BDV[Double]] {
+      def calculate(beta: BDV[Double]): (Double, BDV[Double]) = {
+        val preds = sigmoid(XWithIntercept * beta) // Predicted probabilities
+        val logLikelihood = (y dot log(preds)) + ((1.0 - y) dot log(1.0 - preds))
+
+        // Compute gradient of logistic loss
+        val gradient = XWithIntercept.t * (preds - y)
+
+        val lassoLoss = lambda * sum(abs(beta)) // lasso
+        val lassoGradient = lambda * signum(beta)
+
+        // Exclude the intercept term from regularization (if addIntercept is true)
+        if (addIntercept) {
+          lassoGradient(0) = 0.0
+        }
+
+        (-logLikelihood + lassoLoss, gradient + lassoGradient) // Return total loss and gradient
+      }
+    }
+
+  // Initialize coefficients (including intercept)
+  val initialCoefficients = BDV.zeros[Double](XWithIntercept.cols)
+
+  // Minimize the regularized negative log-likelihood to find the best coefficients
+  val coefficients = minimize(logisticLoss, initialCoefficients)
+  coefficients
+}
 
 
   /**
