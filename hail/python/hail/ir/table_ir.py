@@ -1056,6 +1056,8 @@ class MatrixToTableApply(TableIR):
                 f'struct{{{key_field_out}:{key_type},stat_ind:array<float64>,p_value_ind:array<float64>,stat:float64,p_value:float64}}'
             )
             return hl.ttable(hl.tstruct(), my_type, [key_field_out])
+        elif name == 'GraphletScreening':
+            return hl.ttable(hl.tstruct(), hl.tstruct(beta=hl.tarray(hl.tfloat64)), ['beta'])
         else:
             assert name == 'LocalLDPrune', name
             return hl.ttable(

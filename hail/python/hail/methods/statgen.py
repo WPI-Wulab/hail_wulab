@@ -3305,6 +3305,12 @@ def ogfisher(key, pval, df, w, n_tests, genotype=None, corr=None, corr_idx=None,
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 
 
+@typecheck(mt=MatrixTable, y_field=str, x_field=str, cov_fields=sequenceof(str), nm=int)
+def graphlet_screening(mt, y_field, x_field, cov_fields, nm=3) -> Table:
+    config = {'name': 'GraphletScreening', 'yField': y_field, 'xField': x_field, 'covFields': cov_fields, 'nm': nm}
+    return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
+
+
 @typecheck(p_value=expr_numeric, approximate=bool)
 def lambda_gc(p_value, approximate=True):
     """

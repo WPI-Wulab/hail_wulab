@@ -54,6 +54,7 @@ from .statgen import (
     filter_alleles_hts,
     genetic_relatedness_matrix,
     gfisher,
+    graphlet_screening,
     hwe_normalized_pca,
     impute_sex,
     lambda_gc,
@@ -153,4 +154,5 @@ __all__ = [
     'VEPConfigGRCh38Version95',
     'vep_json_typ',
     'get_vcf_header_info',
+    'graphlet_screening',
 ]
