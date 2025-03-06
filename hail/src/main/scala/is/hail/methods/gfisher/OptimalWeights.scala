@@ -3,6 +3,7 @@ package is.hail.methods.gfisher
 import is.hail.GaussKronrod
 
 import breeze.linalg.{DenseVector => BDV, DenseMatrix => BDM, _}
+import breeze.numerics.{abs, sqrt}
 
 import net.sourceforge.jdistlib.Normal
 
@@ -10,6 +11,109 @@ import org.apache.commons.math3.util.CombinatoricsUtils.factorialDouble
 
 object OptimalWeights {
 
+  def optimalWeightsG(
+    g: Double => Double,
+    G: BDM[Double],
+    b: BDV[Double],
+    pi: BDV[Double],
+    X: BDM[Double],
+    y: BDV[Double],
+    burden: Boolean,
+    binary: Boolean = false,
+    forcePositiveWeights: Boolean=true
+  ): BDV[Double] = {
+    val (bStar, gHG) = if (binary) {
+      val (hH, y0, _) = getH_Binary(X, y)
+      val GTilde = sqrt(y0 *:* (1.0 - y0)) *:* G(::, *)
+      val GHalf = GTilde.t * hH
+      val GHG = GTilde.t * GTilde - GHalf * GHalf.t
+      (sqrt(diag(GHG)) *:* b, GHG)
+    } else {
+      val (hH, s0, _) = getH_Continuous(X, y)
+      val GHalf = G.t * hH
+      val GHG = G.t * G - GHalf * GHalf.t
+      ((sqrt(diag(GHG)) *:* b) /:/ s0, GHG)
+    }
+    val M = cov2cor(gHG)
+    return optimalWeightsM(g, bStar, pi, M, burden, forcePositiveWeights)
+  }
+
+  /**
+    * Calculate the optimal weights based on Bstar (scaled effect size), PI (likelihood of causality), and M (correlation matrix of marginal Z-scores)
+    *
+    * @param g
+    * @param bStar
+    * @param pi
+    * @param M
+    * @param burden
+    * @param forcePositiveWeights
+    */
+  def optimalWeightsM(
+    g: (Double) => Double,
+    bStar: BDV[Double],
+    pi: BDV[Double],
+    M: BDM[Double],
+    burden: Boolean,
+    forcePositiveWeights: Boolean=true
+  ): BDV[Double] = {
+    val n = bStar.length
+    val mu: BDV[Double] = bStar *:* pi  // mean of theta (random effects)
+    val mmu: BDV[Double] = M * mu // mean of marginal Z-scores when effects are random
+    val v: BDV[Double] = (bStar ^:^ 2.0) *:* pi *:* (1.0 - pi) // variance of theta (random effects)
+    // I think (`diag(v) * M` is equal to `v *:* M(::, *)`, and I believe the former is faster)
+    val MVM: BDM[Double] = (v *:* M(::, *)).t * M // faster way to compute M'VM, when V is a diagonal matrix. M+MVM is the variance matrix of marginal Z-scores when effects are random
+
+    // I couldn't find a way to check if two functions are identical in scala, so I just added another argument to do the liptak/burden test
+    if (burden) {
+      return optimalWeightsM_Burden(bStar, pi, M, forcePositiveWeights)
+    }
+
+    // Normal approximation
+
+    val rTilde: BDV[Double] = getRTilde(g, mmu, diag(M + MVM))
+
+    //Bahadur efficiency (BE)
+    val sigmaBETilde: BDM[Double] = covM_gXgY(g, BDV.zeros[Double](n), BDV.zeros[Double](n), M)
+    val wts_BE = getWts(sigmaBETilde, rTilde, forcePositiveWeights)
+    // asymptotic power rate (APE?)
+    val sigmaAPETilde: BDM[Double] = covM_gXgY(g, mmu, mmu, M + MVM)
+    val wts_APE: BDV[Double] = getWts(sigmaAPETilde, rTilde, forcePositiveWeights)
+
+    // Sparse approximation
+
+    val r = getR(g, bStar, pi)
+    // Bahadur efficiency
+    val sigmaBE = getSigma(g, bStar, pi, M, h1 = false)
+    val wts_BE_sparse = getWts(sigmaBE, r, forcePositiveWeights)
+    // asymptotic power rate
+    val sigmaAPE = getSigma(g, bStar, pi, M, h1 = true)
+    val wts_APE_sparse = getWts(sigmaAPE, r, forcePositiveWeights)
+
+    return wts_BE
+  }
+
+  def optimalWeightsM_Burden(
+    bStar: BDV[Double],
+    pi: BDV[Double],
+    M: BDM[Double],
+    forcePositiveWeights: Boolean=true
+  ): BDV[Double] = {
+    val n = bStar.size
+    val mu: BDV[Double] = bStar *:* pi  // mean of theta (random effects)
+    val v: BDV[Double] = (bStar ^:^ 2.0) *:* pi *:* (1.0 - pi) // variance of theta (random effects)
+    // I think (`diag(v) * M` is equal to `v *:* M(::, *)`, and I believe the latter is slightly faster)
+
+    // I couldn't find a way to check if two functions are identical in scala, so I just added another argument to do the liptak/burden test
+    val wts_BE = mu
+    val wts_APE = inv(BDM.eye[Double](n) + (v *:* M(::, *))) * mu
+    if (forcePositiveWeights) {
+      wts_APE(wts_APE <:< 0.0) := 0.0
+      wts_BE(wts_BE <:< 0.0) := 0.0
+    }
+    wts_BE := wts_BE / (sum(abs(wts_BE)) / n)
+    wts_APE := wts_APE / (sum(abs(wts_APE)) / n)
+    return wts_BE
+  }
 
 
   /**
@@ -188,6 +292,31 @@ object OptimalWeights {
   def getRTilde(g: (Double) => Double, mu: BDV[Double], sd: BDV[Double]): BDV[Double] = {
     val n = mu.size
     return BDV.tabulate(n){(i) => E_gX_p(g, mu(i),  1.0, sd(i)) - E_gX_p(g, 0.0, 1.0, 1.0) }
+  }
+
+  def getH_Continuous(X: BDM[Double], y: BDV[Double]): (BDM[Double], Double, BDV[Double]) = {
+    // compute solution to X * beta = y, manually calculate residuals
+    val n = y.length
+    // val XIntercept = BDM.horzcat(BDM.ones[Double](n, 1), X)
+    // val beta = lin_solve(XIntercept, y)
+    // val yPred = (XIntercept * beta)
+
+    val yPred = lin_reg_predict(X, y, method="direct", addIntercept=true)
+    val resids = y - yPred
+
+    val sd = sqrt(sum((resids - mean(resids)) ^:^ 2.0) / (n - 1.0))
+    val HHalf = X * (cholesky(inv(X.t * X)))
+    return(HHalf, sd, resids)
+  }
+
+  def getH_Binary(X: BDM[Double], y: BDV[Double]): (BDM[Double], BDV[Double], BDV[Double]) = {
+    val y0 = log_reg_predict(X, y)
+    val resids = y - y0
+
+    val XTilde = sqrt(y0 *:* (1.0-y0)) *:* X(::,*)
+    val HHalf = XTilde * cholesky(inv(XTilde.t * XTilde))
+
+    return((HHalf, y0, resids))
   }
 
 

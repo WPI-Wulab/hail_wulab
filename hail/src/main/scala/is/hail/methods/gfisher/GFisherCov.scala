@@ -1,9 +1,10 @@
 /*
 This file contains the function for computing a GFisher covariance matrix
-Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value 
+Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
 Creators: Kylie Hoar
-Last update (latest update first): 
+Last update (latest update first):
+  PHowell 2025-02-26: Allow double degrees of freedom
   KHoar 2024-11-30: sample format for future edits
 */
 
@@ -25,9 +26,9 @@ object GFisherCov {
     * @param one_sided true = one-sided input p-values, false = two-sided input p-values.
     * @return covariance of T(l) and T(r) in Corollary 2
     */
-  def getGFisherCov(D1: BDV[Int], D2: BDV[Int], W1: BDV[Double], W2: BDV[Double], M: BDM[Double], varCorrect: Boolean = true, one_sided: Boolean = false): Double = {
-        val (coeff1_res1, coeff2_res1, coeff3_res1, coeff4_res1) = GFisherCoefs.getGFisherCoefs(D1.mapValues(_.toInt))
-        val (coeff1_res2, coeff2_res2, coeff3_res2, coeff4_res2) = GFisherCoefs.getGFisherCoefs(D2.mapValues(_.toInt))
+  def getGFisherCov(D1: BDV[Double], D2: BDV[Double], W1: BDV[Double], W2: BDV[Double], M: BDM[Double], varCorrect: Boolean = true, one_sided: Boolean = false): Double = {
+        val (coeff1_res1, coeff2_res1, coeff3_res1, coeff4_res1) = GFisherCoefs.getGFisherCoefs(D1)
+        val (coeff1_res2, coeff2_res2, coeff3_res2, coeff4_res2) = GFisherCoefs.getGFisherCoefs(D2)
         val GM_cross = if (!one_sided) {
           val term1 = (M.mapValues(math.pow(_, 2.0)) / 2.0 * (coeff1_res1 * coeff1_res2.t))
           val term2 = (M.mapValues(math.pow(_, 4.0)) / 24.0 * (coeff2_res1 * coeff2_res2.t))

@@ -4,12 +4,292 @@ import is.hail.stats.eigSymD
 import is.hail.utils.fatal
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
-import breeze.numerics.{abs, sqrt}
-
+import breeze.numerics.{abs, sqrt, sigmoid}
+import breeze.optimize.{DiffFunction, minimize}
 import net.sourceforge.jdistlib.{ChiSquare, Normal}
-
+import is.hail.types.physical.PStruct
 
 package object gfisher {
+
+  def all[T](vals: Iterable[T], condition: (T) => Boolean): Boolean = {
+    for (x <- vals) {
+      if (!condition(x)) {
+        return false
+      }
+    }
+    return true
+  }
+
+  def all(bools: Iterable[Boolean]): Boolean = {
+    for (bool <- bools) {
+      if (!bool)
+        return false
+    }
+    return true
+  }
+
+  /**
+    * Calculate Pearson's correlation coefficient between two vectors
+    *
+    * @param x
+    * @param y
+    */
+  def cor(x: BDV[Double], y: BDV[Double]): Double = {
+    val n = x.length
+    val mx = sum(x) / n.toDouble
+    val my = sum(y) / n.toDouble
+    val xmx = x - mx
+    val ymy = y - my
+    return (xmx dot ymy) / sqrt(xmx dot xmx) / sqrt(ymy dot ymy)
+  }
+
+  // this function is not correct and should not be used
+  def rowCorBad(X: BDM[Double]): BDM[Double] = {
+    val rows = X.rows
+    val rowsD = rows.toDouble
+    // val cols = X.cols
+    val res = BDM.eye[Double](rows)
+    val rowMeans = new Array[Double](rows)
+
+    for (i <- 0 until rows) {
+      rowMeans(i) = sum(X(i,::)) / rowsD
+      //maybe: do x - xbar before
+    }
+    for (i <- 0 until (rows - 1)) {
+      // maybe get Xi - Xbar here
+      val xmx = X(i,::) - rowMeans(i)
+      for (j <- (i + 1) until rows) {
+        val ymy = X(j,::) - rowMeans(j)
+        res(i, j) = sum(xmx *:* ymy) / sqrt(sum(xmx *:* xmx)) / sqrt(sum(ymy *:* ymy))
+        res(j,i) = res(i,j)
+      }
+    }
+    return res
+  }
+
+  /**
+    * Calculate Pearson's correlation coefficient between the columns of a matrix
+    *
+    * Creates a copy of the matrix to avoid modifying it.
+    *
+    * @param x matrix
+    */
+  def colCorrelation(x: BDM[Double]): BDM[Double] = {
+    val rows = x.rows
+    val cols = x.cols
+    val rowsD = rows.toDouble
+    val X = x.copy
+    val res = BDM.eye[Double](cols)
+    val sumSqrs = new Array[Double](cols)
+    for (i <- 0 until cols) {
+      var sum = 0.0
+      for (j <- 0 until rows)
+        sum += X(j,i)
+      val mean = sum / rowsD
+      var sumSqr = 0.0
+      for (j <- 0 until rows) {
+        X(j,i) = X(j,i) - mean
+        sumSqr += math.pow(X(j,i), 2.0)
+      }
+      sumSqrs(i) = math.sqrt(sumSqr)
+    }
+    for (i <- 0 until cols) {
+      for (j <- (i+1) until cols) {
+        var numerator = 0.0
+        for (k <- 0 until rows)
+          numerator += X(k, i) * X(k, j)
+        val denom = sumSqrs(i) * sumSqrs(j)
+        res(i,j) = numerator / denom
+        res(j,i) = res(i,j)
+      }
+    }
+    return res
+  }
+
+  /**
+    * Calculate Pearson's correlation coefficient between the rows of a matrix
+    *
+    * This method creates a copy of the matrix to avoid modifying it.
+    *
+    * @param x
+    */
+  def rowCorrelation(x: BDM[Double]): BDM[Double] = {
+    val rows = x.rows
+    val cols = x.cols
+    val colsD = cols.toDouble
+    val X = x.copy
+    val res = BDM.eye[Double](rows)
+    val sumSqrs = new Array[Double](rows)
+    for (i <- 0 until rows) {
+      var sum = 0.0
+      for (j <- 0 until cols)
+        sum += X(i,j)
+      val mean = sum / colsD
+      var sumSqr = 0.0
+      for (j <- 0 until cols) {
+        X(i,j) = X(i,j) - mean
+        sumSqr += math.pow(X(i,j), 2.0)
+      }
+      sumSqrs(i) = math.sqrt(sumSqr)
+    }
+    for (i <- 0 until rows) {
+      for (j <- (i+1) until rows) {
+        var numerator = 0.0
+        for (k <- 0 until cols)
+          numerator += X(i, k) * X(j, k)
+        val denom = sumSqrs(i) * sumSqrs(j)
+        res(i,j) = numerator / denom
+        res(j,i) = res(i,j)
+      }
+    }
+    return res
+  }
+
+  /**
+    * This function is slower than the one above.
+    *
+    * @param X
+    */
+  def rowCorrelationSlow(X: BDM[Double]): BDM[Double] = {
+    val rows = X.rows
+    val cols = X.cols
+    val rowMeans = sum(X(*,::)) / cols.toDouble
+    val XMX = X(::, *) - rowMeans
+    val res = BDM.eye[Double](rows)
+    for (i <- 0 until (rows - 1)) {
+      for (j <- (i+1) until (rows)) {
+        res(i, j) = (XMX(i,::) dot XMX(j,::)) / sqrt(XMX(i,::) dot XMX(i,::)) / sqrt(XMX(j,::) dot XMX(j,::))
+        res(j, i) = res(i, j)
+      }
+    }
+    return res
+  }
+
+  def getFieldIds(fullRowType: PStruct, fieldNames: String*): Array[Int] = {
+    val idxs = new Array[Int](fieldNames.length)
+    for (i <- 0 until fieldNames.length)
+      idxs(i) = fullRowType.field(fieldNames(i)).index
+    return idxs
+  }
+
+
+  def mean(x: BDV[Double]): Double = sum(x) / x.size
+
+  /**
+    * Uses method described in the _linear_skat function in statgen.py to directly compute the predicted values of the best fit model y = Xb
+    *
+    * @param x
+    * @param y
+    * @param addIntercept whether to add a column of ones to x.
+    * @param method method to solve the equation. "direct" bypasses the coefficient and goes directly to the best-predicted value using the reduced QR decomposition. "qr" uses the method that Skat.scala uses to calculate beta which uses breeze's solve after using QR.
+    * "breeze" simply does `X \ y`. "naive" uses the closed form equation for OLS, `inv(X.t * X) * X.t * y`
+    *
+    */
+  def lin_reg_predict(x: BDM[Double], y: BDV[Double], method: String = "direct", addIntercept: Boolean = true): BDV[Double] = {
+    val X = if (addIntercept) {
+      BDM.horzcat(BDM.ones[Double](x.rows, 1), x)
+    } else {
+      x
+    }
+    if (method == "direct") {
+      val QR = qr.reduced(X)
+      val q = QR.q
+      return q * q.t * y
+    }
+    val beta = lin_solve(X, y, method, false)
+    return X * beta
+  }
+
+  /**
+    * wrapper for solving linear equation Xb = y for b. returns the solution. Like `np.solve(X, y)` with numpy, or `X \ y` in matlab, or `solve(X, y)` in R
+    *
+    * @param X matrix
+    * @param y vector
+    * @param method how to compute it either qr, breeze, or naive.
+    * `qr` uses the method that Skat.scala uses, which still uses breeze's solve.
+    * `breeze` simply does `X \ y`.
+    * `naive` uses the closed form equation for OLS, `inv(X.t * X) * X.t * y`
+    */
+  def lin_solve(x: BDM[Double], y: BDV[Double], method: String = "qr", addIntercept: Boolean = false): BDV[Double] = {
+    val X = if (addIntercept) {
+      BDM.horzcat(BDM.ones[Double](x.rows, 1), x)
+    } else {
+      x
+    }
+    method match {
+      case "qr" =>
+        val QR = qr.reduced(x)
+        val Qt = QR.q.t
+        val R = QR.r
+        R \ (Qt * y)
+      case "breeze" => X \ y
+      case "naive" => inv(X.t * X) * X.t * y
+      case _ => throw new IllegalArgumentException(s"unknown method: $method")
+    }
+  }
+
+  def stdErrLinearRegression3(X: BDM[Double], y: BDV[Double]): BDV[Double] = {
+    val QR = qr.reduced(X)
+    val yhat = QR.q * QR.q.t * y
+    val residuals: BDV[Double] = y - yhat
+    val sigma2: Double = (residuals dot residuals) / (X.rows - X.cols)
+    val se: BDV[Double] = sqrt(diag(inv(QR.r.t * QR.r)) * sigma2)
+    return se
+  }
+
+
+
+
+  /**
+    * fit coefficients for a logistic regression model
+    *
+    * Created by Kylie Hoar
+    *
+    * Modified by Peter Howell, 06 Feb 2025
+    *
+    * @param X feature matrix
+    * @param y response variable
+    * @param addIntercept
+    * @return the fitted coefficients
+    */
+  def log_reg_fit(X: BDM[Double], y: BDV[Double], addIntercept: Boolean=false): BDV[Double] = {
+    // Add intercept term by appending a column of ones to X
+    val XWithIntercept = if (addIntercept) {
+      BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+    } else X
+
+    // Define the negative log-likelihood function and its gradient
+    val logisticLoss = new DiffFunction[BDV[Double]] {
+      def calculate(beta: BDV[Double]): (Double, BDV[Double]) = {
+        val preds = sigmoid(XWithIntercept * beta) // Predicted probabilities
+        val logLikelihood = (y dot breeze.numerics.log(preds)) +
+          ((1.0 - y) dot breeze.numerics.log(1.0 - preds))
+        val gradient = XWithIntercept.t * (preds - y) // Gradient of the loss function
+        (-logLikelihood, gradient) // Return negative log-likelihood and gradient
+      }
+    }
+
+    // Initialize coefficients (including intercept)
+    val initialCoefficients = BDV.zeros[Double](XWithIntercept.cols)
+
+    // Minimize the negative log-likelihood to find the best coefficients
+    // val optimizer = new LBFGS[BDV[Double]](maxIter = 1000, tolerance = 1e-10)
+    val coefficients = minimize(logisticLoss, initialCoefficients)
+    return coefficients
+  }
+
+  /**
+    * Train the logistic regression model using gradient descent and predict probabilities for the given feature matrix.
+    * @param X Input feature matrix (rows: observations, cols: features).
+    * @param y Target vector (binary labels: 0 or 1).
+    * @return predicted probabilities from fitted model
+    */
+  def log_reg_predict(X: BDM[Double], y: BDV[Double]): BDV[Double] = {
+    val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+    val coefficients = log_reg_fit(X, y, false)
+    // Predict probabilities for the given feature matrix
+    return sigmoid(XWithIntercept * coefficients)
+  }
 
   /**
     * GFisher transformation function 'g' for two sided p-values
@@ -17,7 +297,7 @@ package object gfisher {
     * @param x
     * @param df
     */
-  def gGFisher2(x: Double, df: Int=2): Double = {
+  def gGFisher2(x: Double, df: Double=2.0): Double = {
     return ChiSquare.quantile(
       math.log(2.0) +
       Normal.cumulative(

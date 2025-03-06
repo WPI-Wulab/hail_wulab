@@ -15,11 +15,11 @@ object StatGFisher {
     */
   def statGFisher(
     p: BDV[Double],
-    df: BDV[Int],
+    df: BDV[Double],
     w: BDV[Double],
   ): Double = {
     // transformed p values
-    val pT: BDV[Double] = if (all(df.map(_ == 2))) {
+    val pT: BDV[Double] = if (df.forall(_ == 2)) {
       -2.0 * log(p)
     } else {
       BDV((0 until p.size).map((i) => {ChiSquare.quantile(p(i), df(i), false, false)}).toArray)

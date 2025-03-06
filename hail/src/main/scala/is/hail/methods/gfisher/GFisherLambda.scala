@@ -19,14 +19,14 @@ object GFisherLambda {
     * @param GM n by n correlation matrix between w_1 T_1, ..., w_n T_n, which is the output of getGFisherGM
     */
   def getGFisherLambda(
-    df: BDV[Int],
+    df: BDV[Double],
     w: BDV[Double],
     M: BDM[Double],
     GM: BDM[Double]
   ): BDV[Double] = {
     val n: Int = df.length
-    val DM: BDM[Int] = min(tile(df, 1, n),  tile(df, 1, n).t)
-    val Mtilde: BDM[Double] = sqrt(abs(GM) /:/ convert(DM, Double) /:/ 2.0) *:* signum(M)
+    val DM: BDM[Double] = min(tile(df, 1, n),  tile(df, 1, n).t)
+    val Mtilde: BDM[Double] = sqrt(abs(GM) /:/ DM /:/ 2.0) *:* signum(M)
     Mtilde(Mtilde >:> 1.0) := 0.999
 
     if (any(eigSymD.justEigenvalues(Mtilde) <:< 1e-10)) {
@@ -37,10 +37,10 @@ object GFisherLambda {
     val WMChol: BDM[Double] = MChol * diag(sqrt(w))
     var lam = reverse(eigSymD.justEigenvalues(WMChol.t * WMChol)) // eigSymD returns the eigen values in the reverse order of R
     if (max(df) > 1) {
-      for (i <- 2 to max(df)) {
+      for (i <- 2 to max(df).toInt) {
         val Ai = BDM.eye[Double](n)
         val aDiag = diag(Ai)
-        aDiag(df <:< i) := 0.0 // this also changes Ai
+        aDiag(df <:< i.toDouble) := 0.0 // this also changes Ai
         lam = BDV.vertcat(lam, reverse(eigSymD.justEigenvalues(WMChol * Ai * WMChol.t)))
       }
     }

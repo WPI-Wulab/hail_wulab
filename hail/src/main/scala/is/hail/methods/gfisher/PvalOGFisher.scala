@@ -7,7 +7,7 @@ object PvalOGFisher {
 
   def pvalOGFisher(
     p: BDV[Double],
-    DF: BDM[Int],
+    DF: BDM[Double],
     W: BDM[Double],
     M: BDM[Double],
     one_sided: Boolean = false,

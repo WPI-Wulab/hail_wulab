@@ -14,7 +14,7 @@ object GFisherGM {
     * @param one_sided whether the p-values are one-sided or not
     */
   def getGFisherGM(
-    df: BDV[Int],
+    df: BDV[Double],
     w: BDV[Double],
     M: BDM[Double],
     one_sided: Boolean = false,
@@ -26,7 +26,7 @@ object GFisherGM {
     } else {
       ((M ^:^ 2.0)/ 2.0) *:* (c1 * c1.t) + ((M ^:^ 4.0)/ 24.0) *:* (c2 * c2.t) + ((M ^:^ 6.0)/ 720.0) *:* (c3 * c3.t) + ((M ^:^ 8.0) / 40320.0) *:* (c4 * c4.t)
     }
-    return diag(sqrt(2*df) *:* w) * cov2cor(GM) * diag(sqrt(2*df) *:* w)
+    return diag(sqrt(2.0*df) *:* w) * cov2cor(GM) * diag(sqrt(2.0*df) *:* w)
   }
 
 }
