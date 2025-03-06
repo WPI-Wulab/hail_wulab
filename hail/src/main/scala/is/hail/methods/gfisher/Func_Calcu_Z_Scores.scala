@@ -258,6 +258,6 @@ object FuncCalcuZScores {
 }
 
 // Run tests when the file is executed
-object Main extends App {
-  is.hail.methods.gfisher.FuncCalcuZScores.runTests()
-}
+//object Main extends App {
+//  is.hail.methods.gfisher.FuncCalcuZScores.runTests()
+//}
