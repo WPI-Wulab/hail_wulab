@@ -1,4 +1,5 @@
 from .family_methods import de_novo, mendel_errors, transmission_disequilibrium_test, trio_matrix
+from .glow import estimate_b, get_best_b_model
 from .impex import (
     export_bgen,
     export_elasticsearch,
@@ -76,6 +77,8 @@ from .statgen import (
 
 __all__ = [
     'trio_matrix',
+    'get_best_b_model',
+    'estimate_b',
     'gfisher',
     'ogfisher',
     'linear_mixed_model',
