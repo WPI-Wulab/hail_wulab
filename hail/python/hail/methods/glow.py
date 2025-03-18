@@ -47,15 +47,23 @@ class _SqrtExpTransformer(_BTransformer):
 
 
 class BModel(PipelineModel):
-    def __init__(self, stages: list[_BTransformer], linreg_idx: int):
+    def __init__(self, stages: list[_BTransformer], linreg_idx: int, prediction_col: str = "estimated_b"):
+        """The fitted model to predict effect size B based on the MAF
+
+        Args:
+            stages (list[_BTransformer]): transformations and predictors used to transform the MAF, predict B, and transform the output
+            linreg_idx (int): index of the actuall predictor in the stages list
+            prediction_col (str, optional): what to call the result. Defaults to "estimated_b".
+        """
         super().__init__(stages=stages)
         self.linreg_idx = linreg_idx
+        self.prediction_col = prediction_col
 
     def _linreg(self):
         return self.stages[self.linreg_idx]
 
     def transform(self, dataset: DataFrame) -> DataFrame:
-        prediction = super().transform(dataset).select("estimated_b")
+        prediction = super().transform(dataset).select(self.prediction_col)
         prediction = prediction.withColumn("__row_id", sf.monotonically_increasing_id())
 
         dataset = dataset.withColumn("__row_id", sf.monotonically_increasing_id())
@@ -76,33 +84,53 @@ class BModel(PipelineModel):
 
 
 class BPipeline(Pipeline):
+    """class containing the pipeline to fit a linear model relating the MAF to the effect size B"""
+
     def __init__(
         self,
         x_col_name: str,
         y_col_name: str,
         X_Transform: _BTransformer = _IdentityTransformer,
         Y_Transform: _BTransformer = _IdentityTransformer,
+        prediction_col: str = "estimated_b",
     ):
+        """Class containing pipeline to fit a linear model relating the MAF to the effect size B
+
+        Args:
+            x_col_name (str): column name of the X values, the MAF
+            y_col_name (str): column name of the Y values, B the effect size
+            X_Transform (_BTransformer, optional): transformation to be applied to the MAF. Defaults to _IdentityTransformer.
+            Y_Transform (_BTransformer, optional): transformation to be applied to B. Defaults to _IdentityTransformer.
+            prediction_col (str, optional): what to call the values predicted by the eventual model. Defaults to "estimated_b".
+        """
         if Y_Transform == _LogTransformer:
             ResponseTranform = _SqrtExpTransformer
         else:
             ResponseTranform = _SqrtTransformer
         self.linreg_idx = 3
+        self.prediction_col = prediction_col
         stages = [
             Y_Transform(inputCol=y_col_name),
             X_Transform(inputCol=x_col_name),
             VectorAssembler(inputCols=[x_col_name], outputCol="__features"),
-            LinearRegression(featuresCol="__features", labelCol=y_col_name, predictionCol="estimated_b"),
-            ResponseTranform(inputCol="estimated_b"),
+            LinearRegression(featuresCol="__features", labelCol=y_col_name, predictionCol=prediction_col),
+            ResponseTranform(inputCol=prediction_col),
         ]
         super().__init__(stages=stages)
 
     def _fit(self, dataset: DataFrame) -> BModel:
         model = super()._fit(dataset)
-        return BModel(model.stages[1:], self.linreg_idx - 1)
+        print(self.prediction_col)
+        dataset.show()
+        return BModel(model.stages[1:], linreg_idx=self.linreg_idx - 1, prediction_col=self.prediction_col)
 
 
-def get_best_b_model(dataset: DataFrame, x_col_name: str, y_col_name: str) -> BModel:
+def get_best_b_model(
+    dataset: DataFrame,
+    x_col_name: str,
+    y_col_name: str,
+    prediction_col: str = "estimated_b",
+) -> BModel:
     """train a model to predict the effect size B based on the MAF.
 
     Args:
@@ -117,7 +145,9 @@ def get_best_b_model(dataset: DataFrame, x_col_name: str, y_col_name: str) -> BM
     best_r2 = -1.0
     for X_Transform in [_IdentityTransformer, _LogTransformer, _FXTransformer, _LogFXTransformer]:
         for Y_Transform in [_IdentityTransformer, _LogTransformer]:
-            model = BPipeline(x_col_name, y_col_name, X_Transform, Y_Transform).fit(dataset)
+            model = BPipeline(x_col_name, y_col_name, X_Transform, Y_Transform, prediction_col=prediction_col).fit(
+                dataset
+            )
             r2 = model.r2()
             if r2 > best_r2:
                 best_model = model
@@ -137,6 +167,7 @@ def estimate_b(
     test_prevalence: Optional[float] = None,
     train_z: Optional[str] = None,
     train_n: Optional[str] = None,
+    prediction_col: str = "estimated_b",
 ) -> DataFrame:
     """predict an estimation for B, the effect size, based on the MAF
 
@@ -152,6 +183,7 @@ def estimate_b(
         test_prevalence (float, optional): prevalence of the trait in the test data. required if `train_binary and not test_binary`. Defaults to None.
         train_z (str, optional): column containing Z scores of the training data. required if `train_binary != test_binary`. Defaults to None.
         train_n (str, optional): column containing the sample size in the training data. required if `train_binary != test_binary`. Defaults to None.
+        prediction_col (str, optional): what to call the estimated B in the resulting DataFrame
 
     Returns:
         DataFrame: the test dataset with a new column `estimated_b`
@@ -162,19 +194,19 @@ def estimate_b(
         else:
             y = (
                 (train_df[train_z] ** 2.0)
-                / (2.0 * train_df[train_n] * train_df[maf_col_name])
-                * (1.0 - train_df[maf_col_name])
+                / (2.0 * train_df[train_n] * train_df[beta_col_name])
+                * (1.0 - train_df[beta_col_name])
             )
-        x = train_df[maf_col_name]
-        train_df = train_df.withColumns({'__y': y, '__x': x}).select("__x", "__y")
-        model = get_best_b_model(train_df, "__x", "__y")
-    test_df_x = test_df.select(test_df[maf_col_name].alias("__x"))
-    prediction = model.transform(test_df_x)
+        train_df = train_df.withColumn(beta_col_name, y)
+        model = get_best_b_model(
+            train_df, x_col_name=maf_col_name, y_col_name=beta_col_name, prediction_col=prediction_col
+        )
+    prediction = model.transform(test_df)
     if train_binary != test_binary:
         if not test_binary:
-            prediction['estimated_b'] = prediction['estimated_b'] * test_df[test_se]
+            prediction[prediction_col] = prediction[prediction_col] * test_df[test_se]
         else:
-            prediction['estimated_b'] = prediction['estimated_b'] / sf.sqrt(
+            prediction[prediction_col] = prediction[prediction_col] / sf.sqrt(
                 test_df[test_prevalence] * (1.0 - test_df[test_se])
             )
 
