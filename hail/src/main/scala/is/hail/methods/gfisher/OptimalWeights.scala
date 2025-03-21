@@ -21,7 +21,7 @@ object OptimalWeights {
     burden: Boolean,
     binary: Boolean = false,
     forcePositiveWeights: Boolean=true
-  ): BDV[Double] = {
+  ): BDM[Double] = {
     val (bStar, gHG) = if (binary) {
       val (hH, y0, _) = getH_Binary(X, y)
       val GTilde = sqrt(y0 *:* (1.0 - y0)) *:* G(::, *)
@@ -55,7 +55,7 @@ object OptimalWeights {
     M: BDM[Double],
     burden: Boolean,
     forcePositiveWeights: Boolean=true
-  ): BDV[Double] = {
+  ): BDM[Double] = {
     val n = bStar.length
     val mu: BDV[Double] = bStar *:* pi  // mean of theta (random effects)
     val mmu: BDV[Double] = M * mu // mean of marginal Z-scores when effects are random
@@ -89,7 +89,7 @@ object OptimalWeights {
     val sigmaAPE = getSigma(g, bStar, pi, M, h1 = true)
     val wts_APE_sparse = getWts(sigmaAPE, r, forcePositiveWeights)
 
-    return wts_BE
+    return BDM(wts_BE, wts_APE, wts_BE_sparse, wts_APE_sparse)
   }
 
   def optimalWeightsM_Burden(
@@ -97,7 +97,7 @@ object OptimalWeights {
     pi: BDV[Double],
     M: BDM[Double],
     forcePositiveWeights: Boolean=true
-  ): BDV[Double] = {
+  ): BDM[Double] = {
     val n = bStar.size
     val mu: BDV[Double] = bStar *:* pi  // mean of theta (random effects)
     val v: BDV[Double] = (bStar ^:^ 2.0) *:* pi *:* (1.0 - pi) // variance of theta (random effects)
@@ -112,7 +112,7 @@ object OptimalWeights {
     }
     wts_BE := wts_BE / (sum(abs(wts_BE)) / n)
     wts_APE := wts_APE / (sum(abs(wts_APE)) / n)
-    return wts_BE
+    return BDM(wts_BE, wts_APE)
   }
 
 
