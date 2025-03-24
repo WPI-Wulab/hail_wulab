@@ -252,18 +252,14 @@ package object gfisher {
     * @param addIntercept
     * @return the fitted coefficients
     */
-  def log_reg_fit(X: BDM[Double], y: BDV[Double], addIntercept: Boolean=false): BDV[Double] = {
-    // Add intercept term by appending a column of ones to X
-    val XWithIntercept = if (addIntercept) {
-      BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
-    } else X
+  def log_reg_fit(X: BDM[Double], y: BDV[Double]): BDV[Double] = {
+    val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
 
     // Define the negative log-likelihood function and its gradient
     val logisticLoss = new DiffFunction[BDV[Double]] {
       def calculate(beta: BDV[Double]): (Double, BDV[Double]) = {
         val preds = sigmoid(XWithIntercept * beta) // Predicted probabilities
-        val logLikelihood = (y dot breeze.numerics.log(preds)) +
-          ((1.0 - y) dot breeze.numerics.log(1.0 - preds))
+        val logLikelihood = sum(y *:* breeze.numerics.log(preds) + (1.0 - y) *:* breeze.numerics.log(1.0 - preds))
         val gradient = XWithIntercept.t * (preds - y) // Gradient of the loss function
         (-logLikelihood, gradient) // Return negative log-likelihood and gradient
       }
@@ -273,7 +269,6 @@ package object gfisher {
     val initialCoefficients = BDV.zeros[Double](XWithIntercept.cols)
 
     // Minimize the negative log-likelihood to find the best coefficients
-    // val optimizer = new LBFGS[BDV[Double]](maxIter = 1000, tolerance = 1e-10)
     val coefficients = minimize(logisticLoss, initialCoefficients)
     return coefficients
   }
@@ -284,12 +279,10 @@ package object gfisher {
     * @param y Target vector (binary labels: 0 or 1).
     * @return predicted probabilities from fitted model
     */
-  def log_reg_predict(X: BDM[Double], y: BDV[Double], addIntercept: Boolean=false): BDV[Double] = {
+  def log_reg_predict(X: BDM[Double], y: BDV[Double]): BDV[Double] = {
     // Add intercept term by appending a column of ones to X
-    val XWithIntercept = if (addIntercept) {
-      BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
-    } else X
-    val coefficients = log_reg_fit(X, y, false)
+    val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+    val coefficients = log_reg_fit(X, y)
     // Predict probabilities for the given feature matrix
     return sigmoid(XWithIntercept * coefficients)
   }
