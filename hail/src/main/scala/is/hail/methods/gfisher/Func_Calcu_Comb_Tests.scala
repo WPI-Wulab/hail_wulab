@@ -196,7 +196,7 @@ object FuncCalcuCombTests {
         additionalParams: Any*
     ): Map[String, BDM[Double]] = {
 
-        val wtsEqu = BDM.ones[Double](1, M.cols) // Equal weights as column vector
+        val wtsEqu = BDM.ones[Double](1, M.cols) // Equal weights as row vector
 
         // Burden Test
         val gBurden: Double => Double = x => x
