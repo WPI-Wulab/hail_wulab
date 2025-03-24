@@ -284,8 +284,11 @@ package object gfisher {
     * @param y Target vector (binary labels: 0 or 1).
     * @return predicted probabilities from fitted model
     */
-  def log_reg_predict(X: BDM[Double], y: BDV[Double]): BDV[Double] = {
-    val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+  def log_reg_predict(X: BDM[Double], y: BDV[Double], addIntercept: Boolean=false): BDV[Double] = {
+    // Add intercept term by appending a column of ones to X
+    val XWithIntercept = if (addIntercept) {
+      BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+    } else X
     val coefficients = log_reg_fit(X, y, false)
     // Predict probabilities for the given feature matrix
     return sigmoid(XWithIntercept * coefficients)
