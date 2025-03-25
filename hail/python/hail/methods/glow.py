@@ -243,7 +243,7 @@ def get_pi_models(
     train = train_df
     need_assembler = isinstance(x_col_name, list)
     lr_feature_name = "__features" if need_assembler else x_col_name
-    logreg = LogisticRegression(featuresCol=lr_feature_name, labelCol=y_col_name, predictionCol=prediction_col)
+    logreg = LogisticRegression(featuresCol=lr_feature_name, labelCol=y_col_name, probabilityCol=prediction_col)
 
     if l1_reg:
         n = train.count()
@@ -328,7 +328,6 @@ def estimate_pi(
     })
     for i, model in enumerate(models):
         pred_i = f"{prediction_col}_{i}"
-        test.printSchema()
         preds = (
             model.transform(test)
             .withColumn(prediction_col, sf.get(vector_to_array(prediction_col), 1))
