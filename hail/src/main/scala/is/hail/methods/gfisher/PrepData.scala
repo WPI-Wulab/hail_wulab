@@ -239,7 +239,7 @@ object GFisherDataPrep {
     rowIdxField: String
   ): RDD[(Annotation, Iterable[GFisherTupleCorr])] = {
     val fullRowType = mv.rvRowPType //PStruct
-
+    println("HELLO I AM HERE")
     val ids = getFieldIds(fullRowType, keyField, rowIdxField, pField, dfField, weightField, corrField)
     val fieldIds = new GFisherCorrFieldIdxs(ids(0), ids(1), ids(2), ids(3), ids(4), ids(5))
     val fieldIdsBC = HailContext.backend.broadcast(fieldIds)
@@ -249,11 +249,11 @@ object GFisherDataPrep {
         val rowProcessor = new GFisherCorrRowProcessor(fullRowType, ptr, fieldIdsBC.value, nRows)
         //check fields defined
         val fieldsDefined = rowProcessor.checkFieldsDefined
-        if (fieldsDefined) {
+        if (!fieldsDefined) {
           None
         }
-
-        rowProcessor.getData(ctx)
+        else
+          rowProcessor.getData(ctx)
       }
     }.groupByKey()
   }
@@ -285,11 +285,11 @@ object GFisherDataPrep {
 
         //check fields defined
         val fieldsDefined = rowProcessor.checkFieldsDefined
-        if (fieldsDefined) {//[Wu: What is the code logic here? It reads like it returns None if fields are defined, but it should return None if fields are not defined.]
+        if (!fieldsDefined) {//[Wu: What is the code logic here? It reads like it returns None if fields are defined, but it should return None if fields are not defined.]
           None
         }
-
-        rowProcessor.getData(ctx)
+        else
+          rowProcessor.getData(ctx)
       }
     }.groupByKey()
   }
@@ -316,11 +316,11 @@ object GFisherDataPrep {
 
         //check fields defined
         val fieldsDefined = rowProcessor.checkFieldsDefined
-        if (fieldsDefined) {
+        if (!fieldsDefined) {
           None
         }
-
-        rowProcessor.getData(ctx)
+        else
+          rowProcessor.getData(ctx)
       }
     }.groupByKey()
   }
@@ -355,8 +355,8 @@ object GFisherDataPrep {
         if (fieldsDefined) {
           None
         }
-
-        rowProcessor.getData(ctx)
+        else
+          rowProcessor.getData(ctx)
       }
     }.groupByKey()
   }
