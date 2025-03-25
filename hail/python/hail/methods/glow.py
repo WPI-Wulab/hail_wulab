@@ -1,10 +1,17 @@
+import warnings
 from typing import Optional
 
 import pyspark.sql.functions as sf
+from numpy import logspace
 from pyspark.ml import Model, Pipeline, PipelineModel, Transformer
+from pyspark.ml.classification import LogisticRegression
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.functions import vector_to_array
 from pyspark.ml.regression import LinearRegression
+from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
 from pyspark.sql import DataFrame
+from pyspark.sql.window import Window
 
 
 class _BTransformer(Transformer):
@@ -120,8 +127,6 @@ class BPipeline(Pipeline):
 
     def _fit(self, dataset: DataFrame) -> BModel:
         model = super()._fit(dataset)
-        print(self.prediction_col)
-        dataset.show()
         return BModel(model.stages[1:], linreg_idx=self.linreg_idx - 1, prediction_col=self.prediction_col)
 
 
@@ -167,7 +172,7 @@ def estimate_b(
     test_prevalence: Optional[float] = None,
     train_z: Optional[str] = None,
     train_n: Optional[str] = None,
-    prediction_col: str = "estimated_b",
+    prediction_col: Optional[str] = "estimated_b",
 ) -> DataFrame:
     """predict an estimation for B, the effect size, based on the MAF
 
@@ -211,3 +216,127 @@ def estimate_b(
             )
 
     return prediction
+
+
+def get_pi_models(
+    train_df: DataFrame,
+    x_col_name: Optional[str | list[str]] = "features",
+    y_col_name: Optional[str] = "class",
+    prediction_col: Optional[str] = "estimated_pi",
+    n_controls: Optional[int] = None,
+    n_models: Optional[int] = None,
+    l1_reg: Optional[bool] = True,
+):
+    """train models to predict causal likelihood pi based on annotations
+
+    Args:
+        train_df (DataFrame, optional): training data..
+        x_col_name (str | list[str], optional): name of the vector features column, or list of the features to be vectorized. if a list, the resulting models will have a feature column of "__features". Defaults to "features".
+        y_col_name (str, optional): name of the column indicating whether it is a case or control. Column must contain only binary values, 0 for control and 1 for case. Defaults to "case".
+        prediction_col (str, optional): what the models should call their prediction. Defaults to "estimated_pi".
+        n_controls (int, optional): maximum number of controls to use when fitting models. If not provided, all will be used.
+        n_models (int, optional): number of models to fit. Defaults to 5.
+    """
+    if n_models is None:
+        raise ValueError("n_models must be provided")
+
+    train = train_df
+    need_assembler = isinstance(x_col_name, list)
+    lr_feature_name = "__features" if need_assembler else x_col_name
+    logreg = LogisticRegression(featuresCol=lr_feature_name, labelCol=y_col_name, predictionCol=prediction_col)
+
+    if l1_reg:
+        n = train.count()
+        logreg.setElasticNetParam(1.0)
+        if need_assembler:
+            n_features = len(x_col_name)
+        else:
+            n_features = train.schema[x_col_name].metadata["ml_attr"]["num_attrs"]
+
+        xyabs = [
+            (
+                train.agg(
+                    sf.sum(
+                        sf.abs(
+                            sf.col(y_col_name)
+                            * (sf.col(x_col_name[i]) if need_assembler else sf.get(sf.col(x_col_name), i))
+                        )
+                    )
+                )
+            ).collect()[0][0]
+            for i in range(n_features)
+        ]
+
+        lambda_max = max(xyabs) / n
+        lambda_min = lambda_max * (0.01 if n < n_features else 1e-4)
+
+        grid = ParamGridBuilder().addGrid(logreg.regParam, logspace(lambda_max, lambda_min, 100)).build()
+        evaluator = BinaryClassificationEvaluator(labelCol=y_col_name, rawPredictionCol=logreg.getRawPredictionCol())
+        logreg = CrossValidator(estimator=logreg, estimatorParamMaps=grid, evaluator=evaluator)
+    # replace later
+    if need_assembler:
+        # have to combine the columns into a single vector.
+        # train = VectorAssembler(inputCols=x_col_name, outputCol="__features").transform(train)
+        model = Pipeline(stages=[VectorAssembler(inputCols=x_col_name, outputCol="__features"), logreg])
+        # model will now be fit on a column called __features
+        # print("warning, the models will now expect a column called __features.")
+        # x_col_name = "__features"
+    else:
+        model = logreg
+
+    if n_controls is None:
+        warnings.warn(
+            "n_controls not provided, using all controls. This means that each model will be trained on the same data"
+        )
+        ctrl_size = 1.0
+    else:
+        ctrl_size = n_controls / train.filter(f"{y_col_name} == 0").count()
+    models = [
+        model.fit(train.sampleBy(y_col_name, fractions={0: ctrl_size, 1: 1.0}).sample(1.0)) for _ in range(n_models)
+    ]
+    return models
+
+
+def estimate_pi(
+    test_df: DataFrame,
+    models: Optional[list[Model]] = None,
+    prediction_col: Optional[str] = "estimated_pi",
+    **kwargs,
+):
+    """estimate the causal likelihood pi based on annotations from testing data using the best model from training
+
+    Args:
+        test_df (DataFrame): testing data to estimate pi for
+        models (list[Model], optional): trained models to predict pi with. if not given, models will be trained with `get_pi_models`.
+        **kwargs: arguments to pass to `get_pi_models`
+
+    Returns:
+        DataFrame: the test data with new columns `prediction_{i}` for each model
+    """
+
+    if models is None:
+        models = get_pi_models(prediction_col=prediction_col, **kwargs)
+
+    colnames = test_df.columns
+    test = test_df
+    for name in colnames:
+        test = test.withColumnRenamed(name, name.replace(".", "_"))
+
+    test_df = test_df.withColumns({
+        prediction_col: sf.lit(0.0),
+        "id": sf.row_number().over(Window().orderBy(sf.lit('A'))),
+    })
+    for i, model in enumerate(models):
+        pred_i = f"{prediction_col}_{i}"
+        test.printSchema()
+        preds = (
+            model.transform(test)
+            .withColumn(prediction_col, sf.get(vector_to_array(prediction_col), 1))
+            .select(prediction_col)
+            .withColumnRenamed(prediction_col, pred_i)
+            .withColumn("id", sf.row_number().over(Window().orderBy(sf.lit('A'))))
+        )
+        test_df = test_df.join(preds, on="id")
+        test_df = test_df.withColumn(prediction_col, test_df[prediction_col] + test_df[pred_i]).drop(pred_i)
+    test_df = test_df.withColumn(prediction_col, test_df[prediction_col] / len(models)).drop("id")
+    return test_df
