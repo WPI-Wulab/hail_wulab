@@ -189,10 +189,10 @@ object FuncCalcuCombTests {
     }
 
     def BSF_test(
-        Zscores: BDV[Double], 
-        M: BDM[Double], 
-        Bstar: BDV[Double], 
-        PI: BDV[Double], 
+        Zscores: BDV[Double],
+        M: BDM[Double],
+        Bstar: BDV[Double],
+        PI: BDV[Double],
         additionalParams: Any*
     ): Map[String, BDM[Double]] = {
 
