@@ -43,29 +43,6 @@ package object gfisher {
     return (xmx dot ymy) / sqrt(xmx dot xmx) / sqrt(ymy dot ymy)
   }
 
-  // this function is not correct and should not be used
-  def rowCorBad(X: BDM[Double]): BDM[Double] = {
-    val rows = X.rows
-    val rowsD = rows.toDouble
-    // val cols = X.cols
-    val res = BDM.eye[Double](rows)
-    val rowMeans = new Array[Double](rows)
-
-    for (i <- 0 until rows) {
-      rowMeans(i) = sum(X(i,::)) / rowsD
-      //maybe: do x - xbar before
-    }
-    for (i <- 0 until (rows - 1)) {
-      // maybe get Xi - Xbar here
-      val xmx = X(i,::) - rowMeans(i)
-      for (j <- (i + 1) until rows) {
-        val ymy = X(j,::) - rowMeans(j)
-        res(i, j) = sum(xmx *:* ymy) / sqrt(sum(xmx *:* xmx)) / sqrt(sum(ymy *:* ymy))
-        res(j,i) = res(i,j)
-      }
-    }
-    return res
-  }
 
   /**
     * Calculate Pearson's correlation coefficient between the columns of a matrix
@@ -172,8 +149,6 @@ package object gfisher {
     return idxs
   }
 
-
-  def mean(x: BDV[Double]): Double = sum(x) / x.size
 
   /**
     * Uses method described in the _linear_skat function in statgen.py to directly compute the predicted values of the best fit model y = Xb
