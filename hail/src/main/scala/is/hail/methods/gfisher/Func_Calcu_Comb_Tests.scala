@@ -5,6 +5,7 @@ import breeze.stats._
 import scala.util.Random
 import net.sourceforge.jdistlib.{Normal, ChiSquare, Cauchy}
 import breeze.stats.distributions.Gaussian
+import breeze.stats.mean
 import breeze.numerics._
 import scala.math.Pi
 

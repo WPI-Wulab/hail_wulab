@@ -1,6 +1,7 @@
 package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
+import breeze.stats.mean
 import scala.math._
 
 object StatOGFisher {
@@ -9,16 +10,6 @@ object StatOGFisher {
     Helper Function
     */
 
-    /**
-    * Function to find the mean of a dense vector
-    *
-    * @param v n dense vector with numeric values
-    * @return mean of the dense vector
-    */
-    def mean[T: Numeric](v: BDV[T]): Double = {
-        val num = implicitly[Numeric[T]]
-        sum(v.map(num.toDouble)) / v.length
-    }
 
     /*
     Main function

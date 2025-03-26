@@ -13,6 +13,7 @@ package is.hail.methods.gfisher
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
 import breeze.numerics._
 import breeze.stats.distributions.Gaussian
+import breeze.stats.{mean, stddev}
 import net.sourceforge.jdistlib.{Normal, ChiSquare, Gamma}
 import net.sourceforge.jdistlib.rng.{RandomEngine, MersenneTwister}
 
@@ -36,30 +37,6 @@ object PGFisher {
       case None => None
     }
     (initializedNsim, initializedSeed)
-  }
-
-  /**
-    * Function to find the mean of a dense vector
-    *
-    * @param v n dense vector with numeric values
-    * @return mean of the dense vector
-    */
-  def mean[T: Numeric](v: BDV[T]): Double = {
-    val num = implicitly[Numeric[T]]
-    sum(v.map(num.toDouble)) / v.length
-  }
-
-  /**
-    * Function to find the standard deviation of a dense vector
-    *
-    * @param v n dense vector with numeric values
-    * @return standard deviation of the dense vector
-    */
-  def stdDev[T: Numeric](v: BDV[T]): Double = {
-    val num = implicitly[Numeric[T]]
-    val vectorDoubles = v.map(num.toDouble)
-    val vectorMean = mean(v)
-    math.sqrt(sum(vectorDoubles.map(x => math.pow(x - vectorMean, 2))) / (v.length - 1))
   }
 
   /*
@@ -141,7 +118,7 @@ object PGFisher {
       } else {
         znull.map(z => 2 * Normal.cumulative(-math.abs(z), 0.0, 1.0, true, false))
       }
-      val ppTrans = if (stdDev(df) == 0.0) {
+      val ppTrans = if (stddev(df) == 0.0) {
         if (df.forall(_ == 2.0)) {
           -2.0 * log(pnull)
         } else {
