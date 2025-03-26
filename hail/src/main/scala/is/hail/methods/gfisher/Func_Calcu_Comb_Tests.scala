@@ -9,17 +9,17 @@ import scala.math.Pi
 
 object FuncCalcuCombTests {
 
-    // Transformation function g(z) for Z-scores with two-sided input p-values
-    def g_GFisher_two(x: Double, df: Int): Double = {
-        val pValueLog = math.log(2) + Normal.cumulative(math.abs(x), 0.0, 1.0, false, true)
-        ChiSquare.quantile(pValueLog, df, false, true)
-    }
+  // Transformation function g(z) for Z-scores with two-sided input p-values
+  def g_GFisher_two(x: Double, df: Double): Double = {
+    val pValueLog = math.log(2) + Normal.cumulative(math.abs(x), 0.0, 1.0, false, true)
+    ChiSquare.quantile(pValueLog, df, false, true)
+  }
 
-    // Transformation function g(x) for Z-scores with one-sided input p-values
-    def g_GFisher_one(x: Double, df: Int): Double = {
-        val pValueLog = Normal.cumulative(x, 0.0, 1.0, false, true)
-        ChiSquare.quantile(pValueLog, df, false, true)
-    }
+  // Transformation function g(x) for Z-scores with one-sided input p-values
+  def g_GFisher_one(x: Double, df: Double): Double = {
+    val pValueLog = Normal.cumulative(x, 0.0, 1.0, false, true)
+    ChiSquare.quantile(pValueLog, df, false, true)
+  }
 
     // Transformation function g(x) for burden/Laptik test (identity function)
     def g_Burden(x: Double): Double = x
@@ -190,10 +190,10 @@ object FuncCalcuCombTests {
     }
 
     def BSF_test(
-        Zscores: BDV[Double], 
-        M: BDM[Double], 
-        Bstar: BDV[Double], 
-        PI: BDV[Double], 
+        Zscores: BDV[Double],
+        M: BDM[Double],
+        Bstar: BDV[Double],
+        PI: BDV[Double],
         additionalParams: Any*
     ): Map[String, BDM[Double]] = {
 
@@ -237,9 +237,9 @@ object FuncCalcuCombTests {
 
     def BSF_test_byP (
         Pvalues: BDV[Double],
-        Zsigns: BDV[Double], 
-        M: BDM[Double], 
-        Bstar: BDV[Double], 
+        Zsigns: BDV[Double],
+        M: BDM[Double],
+        Bstar: BDV[Double],
         PI: BDV[Double]
     ): Map[String, BDM[Double]] = {
         val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
@@ -248,9 +248,9 @@ object FuncCalcuCombTests {
 
     def BSF_cctP_test (
         Pvalues: BDV[Double],
-        Zscores: BDV[Double], 
-        M: BDM[Double], 
-        Bstar: BDV[Double], 
+        Zscores: BDV[Double],
+        M: BDM[Double],
+        Bstar: BDV[Double],
         PI: BDV[Double]
     ): Map[String, BDM[Double]] = {
         val bsf = BSF_test(Zscores, M, Bstar, PI)
@@ -284,9 +284,9 @@ object FuncCalcuCombTests {
 
     def BSF_cctP_test_byP (
         Pvalues: BDV[Double],
-        Zsigns: BDV[Double], 
-        M: BDM[Double], 
-        Bstar: BDV[Double], 
+        Zsigns: BDV[Double],
+        M: BDM[Double],
+        Bstar: BDV[Double],
         PI: BDV[Double]
     ): Map[String, BDM[Double]] = {
         val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
