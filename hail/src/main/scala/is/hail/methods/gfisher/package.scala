@@ -203,13 +203,23 @@ package object gfisher {
     }
   }
 
-  def stdErrLinearRegression3(X: BDM[Double], y: BDV[Double]): BDV[Double] = {
+  /**
+    * Do linear regression and return the coefficients, standard errors, and residuals. Uses the QR decomposition method.
+    *
+    * @param X
+    * @param y
+    * @return tuple of (coefficients, standard errors, residuals)
+    */
+  def stdErrLinearRegression(X: BDM[Double], y: BDV[Double]): (BDV[Double], BDV[Double], BDV[Double]) = {
     val QR = qr.reduced(X)
-    val yhat = QR.q * QR.q.t * y
+    val Qt = QR.q.t
+    val R = QR.r
+    val beta = R \ (Qt * y)
+    val yhat = X * beta
     val residuals: BDV[Double] = y - yhat
     val sigma2: Double = (residuals dot residuals) / (X.rows - X.cols)
-    val se: BDV[Double] = sqrt(diag(inv(QR.r.t * QR.r)) * sigma2)
-    return se
+    val se: BDV[Double] = sqrt(diag(inv(R.t * R)) * sigma2)
+    return (beta, se, residuals)
   }
 
 
