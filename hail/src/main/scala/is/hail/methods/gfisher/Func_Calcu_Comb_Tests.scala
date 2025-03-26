@@ -24,25 +24,25 @@ object FuncCalcuCombTests {
     // Transformation function g(x) for burden/Laptik test (identity function)
     def g_Burden(x: Double): Double = x
 
-    // Combines g_GFisher_two and g_GFisher_one, controlled by pType ("one" or "two")
-    def g_GFisher(x: Double, df: Int, pType: String = "two"): Double = {
-        pType match {
-        case "two" => g_GFisher_two(x, df)
-        case "one" => g_GFisher_one(x, df)
-        case _ => throw new IllegalArgumentException("pType must be 'one' or 'two'")
-        }
+  // Combines g_GFisher_two and g_GFisher_one, controlled by oneSided ("one" or "two")
+  def g_GFisher(x: Double, df: Double, oneSided: Boolean = false): Double = {
+    if (oneSided)  {
+      g_GFisher_two(x, df)
+    } else {
+      g_GFisher_one(x, df)
     }
+  }
 
-    def calcu_SgZ_p (
-        g: BDV[Double] => BDV[Double],  // Function g
-        Zscores: BDV[Double],
-        wts: BDV[Double],
-        calc_p: Boolean = false,
-        M: Option[BDM[Double]] = None,
-        df: Option[Double] = None,  // supports positive infinity
-        pType: String = "two",
-        isPosiWts: Boolean = true
-    ): Map[String, Any] = {
+  def calcu_SgZ_p (
+    g: BDV[Double] => BDV[Double],  // Function g
+    Zscores: BDV[Double],
+    wts: BDV[Double],
+    calc_p: Boolean = false,
+    M: Option[BDM[Double]] = None,
+    df: Option[Double] = None,  // supports positive infinity
+    oneSided: Boolean = false, // never actually used
+    isPosiWts: Boolean = true
+  ): Map[String, Any] = {
 
         var weights = if (isPosiWts) wts.map(x => math.max(x, 0)) else wts  // force the weights to be non-negative
 
@@ -51,61 +51,63 @@ object FuncCalcuCombTests {
         weights = BDV.fill(Zscores.size)(weights(0))  // You can use weights(0) or another logic to fill the vector
         }
 
-        // always scale the weights
-        if (weights.map(math.abs).sum > 0) {
-            weights = weights / weights.map(math.abs).sum
-        }
+    // always scale the weights
+    if (weights.map(math.abs).sum > 0) { // this gives a weird warning
+      weights = weights / weights.map(math.abs).sum// this gives a weird warning
+    }
 
         // calculate the statistic S using the provided g function
         val S = sum(weights.asInstanceOf[BDV[Double]] *:* g(Zscores))
 
-        if(calc_p) {
-            // assign proper df data types depending on the df input value
-            val dfInt: Int = df match {
-                case Some(d) if d.isValidInt => d.toInt
-                case Some(Double.PositiveInfinity) => Int.MaxValue
-                case _ => 0
-            }
-            // separate the calculation for burden test (df = Inf) and GFisher test
-            if (dfInt == Int.MaxValue) {
-                // burden test
-                val M_mat = M.getOrElse(BDM.zeros[Double](weights.length, weights.length))
-                val S_sd = math.sqrt(weights.t * M_mat * weights)
-                val normalDist = new Normal(0, S_sd)
-                val p = 2 * normalDist.cumulative(-math.abs(S))
-                Map("S" -> S, "p" -> p)
-            } else if (dfInt != 0) {
-                // GFisher statistics
-                // set degrees of freedom to be a vector, not an integer
-                val (numRows, numCols) = M.map(m => (m.rows, m.cols)).getOrElse((0, 0))
-                val degreesOfFreedom = BDV.fill(numRows)(dfInt.toDouble)
-                // rescale the weights
-                weights = weights/sum(weights.map(math.abs))
-                // recalculate the S to be consistent with the new weights
-                val S_ = sum(weights * g(Zscores))
-                // calculate pGFisher (HYB)
-                lazy val matrix: BDM[Double] = M.getOrElse(BDM.zeros[Double](numRows, numCols))
-                val p = PGFisher.pGFisherHyb(S_, degreesOfFreedom, weights, matrix)
-                Map("S" -> S_, "p" -> p)
-            } else {
-                Map("S" -> S)
-            }
-        } else {
-            Map("S" -> S)
-        }
-    }
+    if(calc_p) {
 
-    // Multi SgZ Test with integrated burden test
-    def multi_SgZ_test(
-        Zscores: BDV[Double],
-        DF: BDM[Double],
-        W: BDM[Double],
-        M: Option[BDM[Double]],
-        pType: String = "two",
-        calcP: Boolean = true,
-        isPosiWts: Boolean = true,
-        wNames: Option[Seq[String]] = None
-    ): Map[String, BDM[Double]] = {
+      // why do this?
+      // assign proper df data types depending on the df input value
+      val dfInt: Int = df match {
+        case Some(d) if d.isValidInt => d.toInt
+        case Some(Double.PositiveInfinity) => Int.MaxValue
+        case _ => 0
+      }
+      // separate the calculation for burden test (df = Inf) and GFisher test
+      if (dfInt == Int.MaxValue) {
+        // burden test
+        val M_mat = M.getOrElse(BDM.zeros[Double](weights.length, weights.length))
+        val S_sd = math.sqrt(weights.t * M_mat * weights)
+        val normalDist = new Normal(0, S_sd)
+        val p = 2 * normalDist.cumulative(-math.abs(S))
+        Map("S" -> S, "p" -> p)
+      } else if (dfInt != 0) {
+        // GFisher statistics
+        // set degrees of freedom to be a vector, not an integer
+        val (numRows, numCols) = M.map(m => (m.rows, m.cols)).getOrElse((0, 0))
+        val degreesOfFreedom = BDV.fill(numRows)(dfInt.toDouble)// why fill with dfInt.toDouble and not use original df?
+        // rescale the weights
+        weights = weights/sum(weights.map(math.abs))
+        // recalculate the S to be consistent with the new weights
+        val S_ = sum(weights * g(Zscores))
+        // calculate pGFisher (HYB)
+        lazy val matrix: BDM[Double] = M.getOrElse(BDM.zeros[Double](numRows, numCols))
+        val p = PGFisher.pGFisherHyb(S_, degreesOfFreedom, weights, matrix)
+        Map("S" -> S_, "p" -> p)
+      } else {
+        Map("S" -> S)
+      }
+    } else {
+      Map("S" -> S)
+    }
+  }
+
+  // Multi SgZ Test with integrated burden test
+  def multi_SgZ_test(
+    Zscores: BDV[Double],
+    DF: BDM[Double],
+    W: BDM[Double],
+    M: Option[BDM[Double]],
+    oneSided: Boolean = false,
+    calcP: Boolean = true,
+    isPosiWts: Boolean = true,
+    wNames: Option[Seq[String]] = None
+  ): Map[String, BDM[Double]] = {
 
         val testN = DF.rows // Number of tests
         val STAT = BDM.zeros[Double](testN, 1)
@@ -114,14 +116,14 @@ object FuncCalcuCombTests {
         for (i <- 0 until testN) {
             val dfValue = DF(i, 0)
 
-            val result = if (dfValue.isPosInfinity) {
-                // Burden test: Use identity function g(x) = x
-                calcu_SgZ_p(x => x, Zscores, W(i, ::).t, calcP, M, Some(dfValue), pType, isPosiWts)
-            } else {
-                // GFisher test with transformation function
-                val g = (x: BDV[Double]) => x.map(v => g_GFisher(v, dfValue.toInt, pType))
-                calcu_SgZ_p(g, Zscores, W(i, ::).t, calcP, M, Some(dfValue), pType, isPosiWts)
-            }
+      val result = if (dfValue.isPosInfinity) {
+        // Burden test: Use identity function g(x) = x
+        calcu_SgZ_p(x => x, Zscores, W(i, ::).t, calcP, M, Some(dfValue), oneSided, isPosiWts)
+      } else {
+        // GFisher test with transformation function
+        val g = (x: BDV[Double]) => x.map(v => g_GFisher(v, dfValue.toInt, oneSided))
+        calcu_SgZ_p(g, Zscores, W(i, ::).t, calcP, M, Some(dfValue), oneSided, isPosiWts)
+      }
 
             STAT(i, 0) = result("S").asInstanceOf[Double]
             if (calcP) PVAL(i, 0) = result("p").asInstanceOf[Double]
@@ -140,15 +142,15 @@ object FuncCalcuCombTests {
         // CCTSTAT initially set to PVAL values
         val CCTSTAT = clippedPvals.copy
 
-        val cct: Double = if (sum(isSmall) == 0.0) {
-            mean(tan(Pi * (0.5 - CCTSTAT)))  // If no small p-values, use regular transformation
-        } else {
-            for (i <- 0 until CCTSTAT.length) {
-                if (!isSmall(i)) CCTSTAT(i) = tan((0.5 - CCTSTAT(i)) * Pi)
-                else CCTSTAT(i) = 1.0 / (CCTSTAT(i) * Pi)
-            }
-            mean(CCTSTAT)  // Compute the mean of transformed values
-        }
+    val cct: Double = if (sum(isSmall) == 0.0) {// this gives a weird warning
+      mean(tan(Pi * (0.5 - CCTSTAT)))  // If no small p-values, use regular transformation
+    } else {
+      for (i <- 0 until CCTSTAT.length) {
+        if (!isSmall(i)) CCTSTAT(i) = tan((0.5 - CCTSTAT(i)) * Pi)
+        else CCTSTAT(i) = 1.0 / (CCTSTAT(i) * Pi)
+      }
+      mean(CCTSTAT)  // Compute the mean of transformed values
+    }
 
         // Compute the final CCT p-value using jdistlib.Cauchy
         val pvalCCT = Cauchy.cumulative(cct, 0.0, 1.0, false, false)
@@ -157,18 +159,18 @@ object FuncCalcuCombTests {
         Map("cct" -> cct, "pval_cct" -> pvalCCT)
     }
 
-    def omni_SgZ_test(
-        Zscores: BDV[Double],
-        DF: BDM[Double],
-        W: BDM[Double],
-        M: BDM[Double],
-        pType: String = "two",
-        calcuP: Boolean = true,
-        isPosiWts: Boolean = true
-    ): Map[String, Any] = {
+  def omni_SgZ_test(
+    Zscores: BDV[Double],
+    DF: BDM[Double],
+    W: BDM[Double],
+    M: BDM[Double],
+    oneSided: Boolean = false,
+    calcuP: Boolean = true,
+    isPosiWts: Boolean = true
+  ): Map[String, Any] = {
 
-        // Call multi_SgZ_test (assuming you've translated this function to Scala)
-        val multiTests = multi_SgZ_test(Zscores, DF, W, Some(M), pType, calcuP, isPosiWts)
+    // Call multi_SgZ_test (assuming you've translated this function to Scala)
+    val multiTests = multi_SgZ_test(Zscores, DF, W, Some(M), oneSided, calcuP, isPosiWts)
 
         val (cct, pvalCct) = if (calcuP) {
             val PVAL_temp = multiTests("PVAL").asInstanceOf[BDM[Double]](::, 0) // Extract first column
