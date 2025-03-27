@@ -1,10 +1,7 @@
 package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
-import breeze.stats._
-import scala.util.Random
 import net.sourceforge.jdistlib.{Normal, ChiSquare, Cauchy}
-import breeze.stats.distributions.Gaussian
 import breeze.numerics._
 import scala.math.Pi
 
@@ -232,5 +229,52 @@ object FuncCalcuCombTests {
 
         // Return properly typed result
         Map("STAT" -> omniStat, "PVAL" -> omniPval)
+    }
+
+    def BSF_test_byP (
+        Pvalues: BDV[Double],
+        Zsigns: BDV[Double], 
+        M: BDM[Double], 
+        Bstar: BDV[Double], 
+        PI: BDV[Double]
+    ): Map[String, BDM[Double]] = {
+        val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
+        BSF_test(Zscores, M, Bstar, PI)
+    }
+
+    def BSF_cctP_test (
+        Pvalues: BDV[Double],
+        Zscores: BDV[Double], 
+        M: BDM[Double], 
+        Bstar: BDV[Double], 
+        PI: BDV[Double]
+    ): Map[String, BDM[Double]] = {
+        val bsf = BSF_test(Zscores, M, Bstar, PI)
+
+        val cct = cctTest(Pvalues)
+        val cctStat = cct("cct").asInstanceOf[Double]
+        val cctP = cct("pval_cct").asInstanceOf[Double]
+
+        // Extract STAT and PVAL matrices from the map
+        val STAT = bsf("STAT").asInstanceOf[BDM[Double]]
+        val PVAL = bsf("PVAL").asInstanceOf[BDM[Double]]
+
+        val PVAL_Vec = PVAL.toDenseVector
+
+        val newPVAL = BDV.vertcat(PVAL_Vec(0 until PVAL.size - 1), BDV(cctP))
+        val bsf_cctP = cctTest(newPVAL)
+
+        val bsf_cctP_stat = bsf_cctP("cct").asInstanceOf[Double]
+        val bsf_cctP_pval = bsf_cctP("pval_cct").asInstanceOf[Double]
+
+        val cctStatMat = BDM.fill(1, 1)(cctStat)
+        val bsf_cctP_statMat = BDM.fill(1, 1)(bsf_cctP_stat)
+        val cctPMat = BDM.fill(1, 1)(cctP)
+        val bsf_cctP_pvalMat = BDM.fill(1, 1)(bsf_cctP_pval)
+
+        val result_stat = BDM.vertcat(STAT, cctStatMat, bsf_cctP_statMat)
+        val result_pval = BDM.vertcat(PVAL.asInstanceOf[BDM[Double]], cctPMat, bsf_cctP_pvalMat)
+
+        Map("STAT" -> result_stat, "PVAL" -> result_pval)
     }
 }

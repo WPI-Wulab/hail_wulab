@@ -15,6 +15,7 @@ import breeze.numerics._
 import breeze.stats._
 import breeze.optimize.{DiffFunction, minimize}
 import is.hail.stats.LogisticRegressionModel
+import net.sourceforge.jdistlib.Normal
 
 object FuncCalcuZScores {
 
@@ -48,6 +49,28 @@ object FuncCalcuZScores {
     val tStatistic = beta(-1) / stdError(-1)
     tStatistic
   }
+
+  def saddleProb(q: Double, mu: BDV[Double], g: BDV[Double]): Double = {
+    // Compute variance (inner product of g * g)
+    val sigmaSq = g dot g
+
+    // Ensure sigmaSq is positive to avoid division errors
+    if (sigmaSq <= 0) {
+        throw new IllegalArgumentException("Variance must be positive")
+    }
+
+    // Compute adjusted mean
+    val muAdj = mu dot g
+
+    // Compute standardized test statistic
+    val z = (q - muAdj) / math.sqrt(sigmaSq)
+
+    // Compute p-value using jdistlib Normal CDF
+    val pValue = 2.0 * (1.0 - Normal.cumulative(Math.abs(z), 0.0, 1.0, false, false))
+
+    pValue
+  }
+
 
   /*
   Main function
@@ -138,4 +161,135 @@ object FuncCalcuZScores {
       "s0" -> scores("s0")
     )
   }
+
+  def getZ_marg_score_binary_SPA (
+      G: BDM[Double],
+      X: BDM[Double],
+      Y: BDV[Double]
+  ): Map[String, Any] = {
+    // Logistic regression model
+    val X1 = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+    val Y0 = log_reg_predict(X, Y)
+
+    // Calculate XVX inverse
+    val sqrtY0 = sqrt(Y0 *:* (1.0 - Y0))
+    val XV = ((X1(::, *) * sqrtY0).t).t
+    val XVX = X1.t * XV
+    val XVX_inv = inv(XVX)
+
+    // Compute XXVX_inv and Gscale
+    val XXVX_inv = X1 * XVX_inv
+    val Gscale = G - (XXVX_inv.t * (XV * G.t)).t
+
+    // Compute score
+    val score = Gscale.t * Y
+
+    // Compute p-values (using a placeholder function)
+    val pval_spa = BDV((0 until score.size).map { x =>
+      saddleProb(score(x), Y0, Gscale(::, x))
+    }.toArray)
+
+    // Compute Z-scores
+    val Zscores_spa = BDV(pval_spa.map(p => Normal.quantile(1.0 - p / 2.0, 0.0, 1.0, false, false)).toArray) *:* signum(score)
+
+    // Compute GHG and M
+    val Xtilde = ((X(::, *) * sqrtY0).t).t    
+    val Hhalf = Xtilde * cholesky(inv(Xtilde.t * Xtilde)).t
+    val Gtilde = ((G(::, *) * sqrtY0).t).t
+    val GHhalf = Gtilde.t * Hhalf
+    val GHG = (Gtilde.t * Gtilde) - (GHhalf * GHhalf.t)
+    val M = cov2cor(GHG)
+
+    // Dispersion parameter
+    val s0 = 1.0
+
+    Map(
+      "Zscores" -> Zscores_spa,
+      "M" -> M,
+      "GHG" -> GHG,
+      "s0" -> s0
+    )
+  }
+
+  def runTests(): Unit = {
+    println("Running inline tests...")
+
+    val G = BDM(
+      (1.0, 0.0, 0.0),
+      (0.0, 1.0, 1.0),
+      (1.0, 1.0, 0.0),
+      (0.0, 0.0, 1.0),
+      (1.0, 0.0, 1.0),
+      (0.0, 1.0, 0.0),
+      (1.0, 1.0, 0.0),
+      (0.0, 0.0, 1.0),
+      (1.0, 0.0, 1.0),
+      (0.0, 1.0, 1.0),
+      (1.0, 1.0, 0.0),
+      (0.0, 0.0, 1.0),
+      (1.0, 0.0, 1.0),
+      (0.0, 1.0, 0.0),
+      (1.0, 1.0, 1.0),
+      (0.0, 0.0, 0.0),
+      (1.0, 0.0, 1.0),
+      (0.0, 1.0, 1.0),
+      (1.0, 1.0, 0.0),
+      (0.0, 0.0, 1.0),
+      (1.0, 0.0, 1.0),
+      (0.0, 1.0, 1.0),
+      (1.0, 1.0, 0.0),
+      (0.0, 0.0, 1.0),
+      (1.0, 0.0, 1.0),
+      (0.0, 1.0, 0.0),
+      (1.0, 1.0, 1.0),
+      (0.0, 0.0, 0.0),
+      (1.0, 0.0, 1.0),
+      (0.0, 1.0, 1.0)
+    )
+
+    val X = BDM(
+        (3.879049, 5.792453),
+        (4.539645, 4.679680),
+        (8.117417, 8.848960),
+        (5.141017, 7.326775),
+        (5.258575, 7.272450),
+        (8.430130, 8.592345),
+        (5.921832, 7.068752),
+        (2.469878, 4.111115),
+        (3.626294, 4.201222),
+        (4.108676, 4.293396),
+        (7.448164, 5.334668),
+        (5.719628, 5.443979),
+        (5.801543, 3.369979),
+        (5.221365, 9.948595),
+        (3.888318, 7.360083),
+        (8.573826, 5.040696),
+        (5.995701, 5.192081),
+        (1.066766, 2.600072),
+        (6.402712, 7.761286),
+        (4.054417, 4.860470),
+        (2.864353, 4.938813),
+        (4.564050, 5.224932),
+        (2.947991, 4.388255),
+        (3.542218, 7.508313),
+        (3.749921, 4.423419),
+        (1.626613, 6.846248),
+        (6.675574, 3.240281),
+        (5.306746, 6.822601),
+        (2.723726, 4.609572),
+        (7.507630, 7.185698)
+    )
+
+    val Y = BDV(0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0)
+
+    val result = FuncCalcuZScores.getZ_marg_score_binary_SPA(G, X, Y)
+
+    println("getZMargScore_SPA result:")
+    println(result)
+  }
+}
+
+// Run tests when the file is executed
+object Main extends App {
+    is.hail.methods.gfisher.FuncCalcuZScores.runTests()
 }
