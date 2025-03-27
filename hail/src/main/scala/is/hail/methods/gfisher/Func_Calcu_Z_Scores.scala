@@ -37,16 +37,9 @@ object FuncCalcuZScores {
   def contZScore (g: BDV[Double], X: BDM[Double], Y: BDV[Double]): Double = {
     // Combine column of g with X
     val XwithG = BDM.horzcat(X, g.toDenseMatrix.t)
-    // Fit linear model to find initialCoefficients
-    val beta = lin_solve(XwithG, Y, method = "qr", addIntercept=false)
-    // Compute predictions
-    val Y_hat = XwithG * beta
-    // Compute residuals
-    val res = Y - Y_hat
-    val variance = (res.t * res) / (XwithG.rows - XwithG.cols)
-    val stdError = sqrt(diag(inv(XwithG.t * XwithG)) * variance)
+    val (beta, se, _) = stdErrLinearRegression(XwithG, Y)
     // Z-score for g
-    val tStatistic = beta(-1) / stdError(-1)
+    val tStatistic = beta(-1) / se(-1)
     tStatistic
   }
 
@@ -93,73 +86,47 @@ object FuncCalcuZScores {
       G: BDM[Double],
       X: BDM[Double],
       Y: BDV[Double],
-      trait_lm: String = "binary",
+      binary: Boolean = false,
       use_lm_t: Boolean = false
   ): Map[String, Any] = {
 
-    val scores = trait_lm match {
+    if (binary) {
+      val (ghg, _, resids) = getGHG_Binary(G, X, Y)
 
-      case "binary" =>
-        // Logistic regression to compute fitted values
-        val Y0 = log_reg_predict(X, Y)
+      val score = G.t * resids
+      val Zscore = score /:/ sqrt(diag(ghg))
 
-        val sqrtY0 = sqrt(Y0 *:* (1.0 - Y0))
-        val Xtilde = ((X(::, *) * sqrtY0).t).t
-        val Hhalf = Xtilde * (cholesky(inv(Xtilde.t * Xtilde + BDM.eye[Double](X.cols) * 1e-6)))
-        val Gtilde = ((G(::, *) * sqrtY0).t).t
-        val GHhalf = Gtilde.t * Hhalf
-        val GHG = Gtilde.t * Gtilde - GHhalf * GHhalf.t
-
-        val score = G.t * (Y - Y0)
-        val Zscore = score /:/ sqrt(diag(GHG))
-
-        Map(
-          "Zscores" -> Zscore,
-          "scores" -> score,
-          "M_Z" -> cov2cor(GHG),
-          "M_s" -> GHG,
-          // s0 = 1 for binary trait
-          "s0" -> 1.0
-        )
-
-      case "continuous" =>
-        val Hhalf = X * (cholesky(inv(X.t * X)))
-        val GHalf = G.t * Hhalf
-        val GHG = G.t * G - GHalf * GHalf.t
-        val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
-        val Y_hat = lin_reg_predict(XWithIntercept, Y, method="direct", addIntercept=false)
-        // Compute residuals
-        val res = Y - Y_hat
-        // estimate of the sd of error based on the null model
-        val s0 = stddev(res)
-        val score = G.t * res / s0
-
-        val Zscore: BDV[Double] = if (use_lm_t) {
-            BDV((0 until G.cols).map { j => contZScore(G(::, j), XWithIntercept, Y) }.toArray)
-        } else {
-            // Z scores based on the score statistics
-            score /:/ sqrt(diag(GHG))
-        }
-
-        Map(
-          "Zscores" -> Zscore,
-          "scores" -> score,
-          "M_Z" -> cov2cor(GHG),
-          "M_s" -> GHG,
-          "s0" -> s0
-        )
-
-      case _ =>
-        throw new IllegalArgumentException(s"Unknown trait type: $trait_lm")
+      return Map(
+        "Zscores" -> Zscore,
+        "scores" -> score,
+        "M_Z" -> cov2cor(ghg),
+        "M_s" -> ghg,
+        // s0 = 1 for binary trait
+        "s0" -> 1.0
+      )
     }
 
-    Map(
-      "Zscores" -> scores("Zscores"),
-      "scores" -> scores("scores"),
-      "M_Z" -> scores("M_Z"),
-      "M_s" -> scores("M_s"),
-      "s0" -> scores("s0")
-    )
+    else {
+      val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+      val (ghg, s0, resids) = getGHG_Continuous(G, X, Y)
+      // Compute residuals
+      val score = G.t * resids / s0
+
+      val Zscore: BDV[Double] = if (use_lm_t) {
+          BDV((0 until G.cols).map { j => contZScore(G(::, j), XWithIntercept, Y) }.toArray)
+      } else {
+          // Z scores based on the score statistics
+          score /:/ sqrt(diag(ghg))
+      }
+
+      return Map(
+        "Zscores" -> Zscore,
+        "scores" -> score,
+        "M_Z" -> cov2cor(ghg),
+        "M_s" -> ghg,
+        "s0" -> s0
+      )
+    }
   }
 
   def getZ_marg_score_binary_SPA (
