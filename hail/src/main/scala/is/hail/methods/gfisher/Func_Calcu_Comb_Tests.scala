@@ -2,7 +2,11 @@ package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
 import net.sourceforge.jdistlib.{Normal, ChiSquare, Cauchy}
+<<<<<<< HEAD
+=======
 import breeze.stats.distributions.Gaussian
+import breeze.stats.mean
+>>>>>>> b25615543bfa3127fee98d263cd9a2fcdb1ec811
 import breeze.numerics._
 import scala.math.Pi
 
@@ -228,7 +232,105 @@ object FuncCalcuCombTests {
     val omniStat = omniOpt("STAT").asInstanceOf[BDM[Double]]
     val omniPval = omniOpt("PVAL").asInstanceOf[BDM[Double]]
 
+        // Combine results into a Map
+        Map(
+            "STAT" -> BDM.vertcat(multiTests("STAT").asInstanceOf[BDM[Double]], BDM(cct.asInstanceOf[Double])),
+            "PVAL" -> BDM.vertcat(multiTests("PVAL").asInstanceOf[BDM[Double]], BDM(pvalCct.asInstanceOf[Double])),
+            "cct" -> cct,
+            "pval_cct" -> pvalCct
+        )
+    }
+
+    def BSF_test(
+        Zscores: BDV[Double], 
+        M: BDM[Double], 
+        Bstar: BDV[Double], 
+        PI: BDV[Double], 
+        additionalParams: Any*
+    ): Map[String, BDM[Double]] = {
+
+        val wtsEqu = BDM.ones[Double](1, M.cols) // Equal weights as row vector
+
+        // Burden Test
+        val gBurden: Double => Double = x => x
+        val statDFBurden = Double.PositiveInfinity
+        val wtsOptBurden = OptimalWeights.optimalWeightsM(gBurden, Bstar, PI, M, true, true)
+        val WT_opt_burden = BDM.vertcat(wtsOptBurden, wtsEqu)
+        val DF_opt_burden = BDM.fill(WT_opt_burden.rows, 1)(statDFBurden)
+
+        // SKAT Test
+        val gSKAT: Double => Double = x => x * x
+        val statDFSKAT = 1.0
+        val wtsOptSKAT = OptimalWeights.optimalWeightsM(gSKAT, Bstar, PI, M, false, true)
+        val WT_opt_skat = BDM.vertcat(wtsOptSKAT, wtsEqu)
+        val DF_opt_skat = BDM.fill(WT_opt_skat.rows, 1)(statDFSKAT)
+
+        // Fisher Test
+        val gFisher: Double => Double = x => g_GFisher_two(x, 2)
+        val statDFFisher = 2.0
+        val wtsOptFisher = OptimalWeights.optimalWeightsM(gFisher, Bstar, PI, M, false, true)
+        val WT_opt_fisher = BDM.vertcat(wtsOptFisher, wtsEqu)
+        val DF_opt_fisher = BDM.fill(WT_opt_fisher.rows, 1)(statDFFisher)
+
+        // Combine everything
+        val WT_opt = BDM.vertcat(WT_opt_skat, WT_opt_burden, WT_opt_fisher)
+        val DF_opt = BDM.vertcat(DF_opt_skat, DF_opt_burden, DF_opt_fisher)
+
+        // Compute the statistics
+        val omniOpt = omni_SgZ_test(Zscores, DF_opt, WT_opt, M)
+
+        // Ensure omniOpt Map values are properly typed
+        val omniStat = omniOpt("STAT").asInstanceOf[BDM[Double]]
+        val omniPval = omniOpt("PVAL").asInstanceOf[BDM[Double]]
+
         // Return properly typed result
         Map("STAT" -> omniStat, "PVAL" -> omniPval)
+    }
+
+    def BSF_test_byP (
+        Pvalues: BDV[Double],
+        Zsigns: BDV[Double], 
+        M: BDM[Double], 
+        Bstar: BDV[Double], 
+        PI: BDV[Double]
+    ): Map[String, BDM[Double]] = {
+        val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
+        BSF_test(Zscores, M, Bstar, PI)
+    }
+
+    def BSF_cctP_test (
+        Pvalues: BDV[Double],
+        Zscores: BDV[Double], 
+        M: BDM[Double], 
+        Bstar: BDV[Double], 
+        PI: BDV[Double]
+    ): Map[String, BDM[Double]] = {
+        val bsf = BSF_test(Zscores, M, Bstar, PI)
+
+        val cct = cctTest(Pvalues)
+        val cctStat = cct("cct").asInstanceOf[Double]
+        val cctP = cct("pval_cct").asInstanceOf[Double]
+
+        // Extract STAT and PVAL matrices from the map
+        val STAT = bsf("STAT").asInstanceOf[BDM[Double]]
+        val PVAL = bsf("PVAL").asInstanceOf[BDM[Double]]
+
+        val PVAL_Vec = PVAL.toDenseVector
+
+        val newPVAL = BDV.vertcat(PVAL_Vec(0 until PVAL.size - 1), BDV(cctP))
+        val bsf_cctP = cctTest(newPVAL)
+
+        val bsf_cctP_stat = bsf_cctP("cct").asInstanceOf[Double]
+        val bsf_cctP_pval = bsf_cctP("pval_cct").asInstanceOf[Double]
+
+        val cctStatMat = BDM.fill(1, 1)(cctStat)
+        val bsf_cctP_statMat = BDM.fill(1, 1)(bsf_cctP_stat)
+        val cctPMat = BDM.fill(1, 1)(cctP)
+        val bsf_cctP_pvalMat = BDM.fill(1, 1)(bsf_cctP_pval)
+
+        val result_stat = BDM.vertcat(STAT, cctStatMat, bsf_cctP_statMat)
+        val result_pval = BDM.vertcat(PVAL.asInstanceOf[BDM[Double]], cctPMat, bsf_cctP_pvalMat)
+
+        Map("STAT" -> result_stat, "PVAL" -> result_pval)
     }
 }
