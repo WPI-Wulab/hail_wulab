@@ -11,7 +11,6 @@ import is.hail.expr.ir.functions.MatrixToTableFunction
 import is.hail.types.virtual.{MatrixType, TFloat64, TStruct, TableType, TArray, TInt32}
 import is.hail.utils._
 
-import is.hail.methods.gfisher.GFisherArrayToVectors
 import is.hail.methods.gfisher.OptimalWeights.{getH_Binary, getH_Continuous}
 import is.hail.methods.gfisher.FuncCalcuZScores.{getZMargScoreBinary, getZMargScoreContinuous}
 import org.apache.spark.sql.Row

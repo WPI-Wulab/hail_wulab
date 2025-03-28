@@ -4,7 +4,7 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
 import net.sourceforge.jdistlib.{Normal, ChiSquare, Cauchy}
 import breeze.stats.distributions.Gaussian
 import breeze.stats.mean
-import breeze.numerics._
+import breeze.numerics.{abs, tan}
 import scala.math.Pi
 
 object FuncCalcuCombTests {
@@ -40,24 +40,24 @@ object FuncCalcuCombTests {
     calc_p: Boolean = false,
     M: Option[BDM[Double]] = None,
     df: Option[Double] = None,  // supports positive infinity
-    oneSided: Boolean = false, // never actually used
+    oneSided: Boolean = false, // never actually used?
     isPosiWts: Boolean = true
   ): Map[String, Any] = {
 
-        var weights = if (isPosiWts) wts.map(x => math.max(x, 0)) else wts  // force the weights to be non-negative
+    var weights = if (isPosiWts) wts.map(x => math.max(x, 0)) else wts  // force the weights to be non-negative
 
-        if (weights.size != Zscores.size) {
-        // If the sizes don't match, resize weights to match Zscores size (by repeating or filling it)
-        weights = BDV.fill(Zscores.size)(weights(0))  // You can use weights(0) or another logic to fill the vector
-        }
-
-    // always scale the weights
-    if (weights.map(math.abs).sum > 0) { // this gives a weird warning
-      weights = weights / weights.map(math.abs).sum// this gives a weird warning
+    if (weights.size != Zscores.size) {
+      // If the sizes don't match, resize weights to match Zscores size (by repeating or filling it)
+      weights = BDV.fill(Zscores.size)(weights(0))  // You can use weights(0) or another logic to fill the vector
     }
 
-        // calculate the statistic S using the provided g function
-        val S = sum(weights.asInstanceOf[BDV[Double]] *:* g(Zscores))
+    // always scale the weights
+    if (sum(abs(weights)) > 0) { // this gives a weird warning
+      weights = weights / sum(abs(weights))// this gives a weird warning
+    }
+
+    // calculate the statistic S using the provided g function
+    val S = sum(weights.asInstanceOf[BDV[Double]] *:* g(Zscores))
 
     if(calc_p) {
 
@@ -109,12 +109,12 @@ object FuncCalcuCombTests {
     wNames: Option[Seq[String]] = None
   ): Map[String, BDM[Double]] = {
 
-        val testN = DF.rows // Number of tests
-        val STAT = BDM.zeros[Double](testN, 1)
-        val PVAL = BDM.zeros[Double](testN, 1)
+    val testN = DF.rows // Number of tests
+    val STAT = BDM.zeros[Double](testN, 1)
+    val PVAL = BDM.zeros[Double](testN, 1)
 
-        for (i <- 0 until testN) {
-            val dfValue = DF(i, 0)
+    for (i <- 0 until testN) {
+      val dfValue = DF(i, 0)
 
       val result = if (dfValue.isPosInfinity) {
         // Burden test: Use identity function g(x) = x
@@ -125,25 +125,25 @@ object FuncCalcuCombTests {
         calcu_SgZ_p(g, Zscores, W(i, ::).t, calcP, M, Some(dfValue), oneSided, isPosiWts)
       }
 
-            STAT(i, 0) = result("S").asInstanceOf[Double]
-            if (calcP) PVAL(i, 0) = result("p").asInstanceOf[Double]
-        }
-
-        Map("STAT" -> STAT, "PVAL" -> PVAL)
+      STAT(i, 0) = result("S").asInstanceOf[Double]
+      if (calcP) PVAL(i, 0) = result("p").asInstanceOf[Double]
     }
 
-    def cctTest(pvals: BDV[Double], thrLargeP: Double = 0.9, thrSmallP: Double = 1e-15): Map[String, Any] = {
-        // Replace large p-values
-        val clippedPvals = pvals.map(p => if (p > thrLargeP) thrLargeP else p)
+    Map("STAT" -> STAT, "PVAL" -> PVAL)
+  }
 
-        // Indicator for small p-values
-        val isSmall = clippedPvals.map(_ < thrSmallP)
+  def cctTest(pvals: BDV[Double], thrLargeP: Double = 0.9, thrSmallP: Double = 1e-15): Map[String, Any] = {
+    // Replace large p-values
+    val clippedPvals = pvals.map(p => if (p > thrLargeP) thrLargeP else p)
 
-        // CCTSTAT initially set to PVAL values
-        val CCTSTAT = clippedPvals.copy
+    // Indicator for small p-values
+    val isSmall = clippedPvals <:< thrSmallP
 
-    val cct: Double = if (sum(isSmall) == 0.0) {// this gives a weird warning
-      mean(tan(Pi * (0.5 - CCTSTAT)))  // If no small p-values, use regular transformation
+    // CCTSTAT initially set to PVAL values
+    val CCTSTAT = clippedPvals.copy
+
+    val cct: Double = if (!any(isSmall)) {// this gives a weird warning
+      mean(tan((0.5 - CCTSTAT) * 0.5))  // If no small p-values, use regular transformation
     } else {
       for (i <- 0 until CCTSTAT.length) {
         if (!isSmall(i)) CCTSTAT(i) = tan((0.5 - CCTSTAT(i)) * Pi)
@@ -152,12 +152,12 @@ object FuncCalcuCombTests {
       mean(CCTSTAT)  // Compute the mean of transformed values
     }
 
-        // Compute the final CCT p-value using jdistlib.Cauchy
-        val pvalCCT = Cauchy.cumulative(cct, 0.0, 1.0, false, false)
+    // Compute the final CCT p-value using jdistlib.Cauchy
+    val pvalCCT = Cauchy.cumulative(cct, 0.0, 1.0, false, false)
 
-        // Return results in a Map
-        Map("cct" -> cct, "pval_cct" -> pvalCCT)
-    }
+    // Return results in a Map
+    Map("cct" -> cct, "pval_cct" -> pvalCCT)
+  }
 
   def omni_SgZ_test(
     Zscores: BDV[Double],
@@ -172,124 +172,124 @@ object FuncCalcuCombTests {
     // Call multi_SgZ_test (assuming you've translated this function to Scala)
     val multiTests = multi_SgZ_test(Zscores, DF, W, Some(M), oneSided, calcuP, isPosiWts)
 
-        val (cct, pvalCct) = if (calcuP) {
-            val PVAL_temp = multiTests("PVAL").asInstanceOf[BDM[Double]](::, 0) // Extract first column
-            val cctResult = cctTest(PVAL_temp)
-            (cctResult("cct").asInstanceOf[Double], cctResult("pval_cct").asInstanceOf[Double])
-        } else {
-            (Double.NaN, Double.NaN)
-        }
-
-        // Combine results into a Map
-        Map(
-            "STAT" -> BDM.vertcat(multiTests("STAT").asInstanceOf[BDM[Double]], BDM(cct.asInstanceOf[Double])),
-            "PVAL" -> BDM.vertcat(multiTests("PVAL").asInstanceOf[BDM[Double]], BDM(pvalCct.asInstanceOf[Double])),
-            "cct" -> cct,
-            "pval_cct" -> pvalCct
-        )
+    val (cct, pvalCct) = if (calcuP) {
+      val PVAL_temp = multiTests("PVAL").asInstanceOf[BDM[Double]](::, 0) // Extract first column
+      val cctResult = cctTest(PVAL_temp)
+      (cctResult("cct").asInstanceOf[Double], cctResult("pval_cct").asInstanceOf[Double])
+    } else {
+      (Double.NaN, Double.NaN)
     }
 
-    def BSF_test(
-        Zscores: BDV[Double],
-        M: BDM[Double],
-        Bstar: BDV[Double],
-        PI: BDV[Double],
-        additionalParams: Any*
-    ): Map[String, BDM[Double]] = {
+    // Combine results into a Map
+    Map(
+      "STAT" -> BDM.vertcat(multiTests("STAT").asInstanceOf[BDM[Double]], BDM(cct.asInstanceOf[Double])),
+      "PVAL" -> BDM.vertcat(multiTests("PVAL").asInstanceOf[BDM[Double]], BDM(pvalCct.asInstanceOf[Double])),
+      "cct" -> cct,
+      "pval_cct" -> pvalCct
+    )
+  }
 
-        val wtsEqu = BDM.ones[Double](1, M.cols) // Equal weights as row vector
+  def BSF_test(
+    Zscores: BDV[Double],
+    M: BDM[Double],
+    Bstar: BDV[Double],
+    PI: BDV[Double],
+    additionalParams: Any*
+  ): Map[String, BDM[Double]] = {
 
-        // Burden Test
-        val gBurden: Double => Double = x => x
-        val statDFBurden = Double.PositiveInfinity
-        val wtsOptBurden = OptimalWeights.optimalWeightsM(gBurden, Bstar, PI, M, true, true)
-        val WT_opt_burden = BDM.vertcat(wtsOptBurden, wtsEqu)
-        val DF_opt_burden = BDM.fill(WT_opt_burden.rows, 1)(statDFBurden)
+    val wtsEqu = BDM.ones[Double](1, M.cols) // Equal weights as row vector
 
-        // SKAT Test
-        val gSKAT: Double => Double = x => x * x
-        val statDFSKAT = 1.0
-        val wtsOptSKAT = OptimalWeights.optimalWeightsM(gSKAT, Bstar, PI, M, false, true)
-        val WT_opt_skat = BDM.vertcat(wtsOptSKAT, wtsEqu)
-        val DF_opt_skat = BDM.fill(WT_opt_skat.rows, 1)(statDFSKAT)
+    // Burden Test
+    val gBurden: Double => Double = x => x
+    val statDFBurden = Double.PositiveInfinity
+    val wtsOptBurden = OptimalWeights.optimalWeightsM(gBurden, Bstar, PI, M, true, true)
+    val WT_opt_burden = BDM.vertcat(wtsOptBurden, wtsEqu)
+    val DF_opt_burden = BDM.fill(WT_opt_burden.rows, 1)(statDFBurden)
 
-        // Fisher Test
-        val gFisher: Double => Double = x => g_GFisher_two(x, 2)
-        val statDFFisher = 2.0
-        val wtsOptFisher = OptimalWeights.optimalWeightsM(gFisher, Bstar, PI, M, false, true)
-        val WT_opt_fisher = BDM.vertcat(wtsOptFisher, wtsEqu)
-        val DF_opt_fisher = BDM.fill(WT_opt_fisher.rows, 1)(statDFFisher)
+    // SKAT Test
+    val gSKAT: Double => Double = x => x * x
+    val statDFSKAT = 1.0
+    val wtsOptSKAT = OptimalWeights.optimalWeightsM(gSKAT, Bstar, PI, M, false, true)
+    val WT_opt_skat = BDM.vertcat(wtsOptSKAT, wtsEqu)
+    val DF_opt_skat = BDM.fill(WT_opt_skat.rows, 1)(statDFSKAT)
 
-        // Combine everything
-        val WT_opt = BDM.vertcat(WT_opt_skat, WT_opt_burden, WT_opt_fisher)
-        val DF_opt = BDM.vertcat(DF_opt_skat, DF_opt_burden, DF_opt_fisher)
+    // Fisher Test
+    val gFisher: Double => Double = x => g_GFisher_two(x, 2)
+    val statDFFisher = 2.0
+    val wtsOptFisher = OptimalWeights.optimalWeightsM(gFisher, Bstar, PI, M, false, true)
+    val WT_opt_fisher = BDM.vertcat(wtsOptFisher, wtsEqu)
+    val DF_opt_fisher = BDM.fill(WT_opt_fisher.rows, 1)(statDFFisher)
 
-        // Compute the statistics
-        val omniOpt = omni_SgZ_test(Zscores, DF_opt, WT_opt, M)
+    // Combine everything
+    val WT_opt = BDM.vertcat(WT_opt_skat, WT_opt_burden, WT_opt_fisher)
+    val DF_opt = BDM.vertcat(DF_opt_skat, DF_opt_burden, DF_opt_fisher)
 
-        // Ensure omniOpt Map values are properly typed
-        val omniStat = omniOpt("STAT").asInstanceOf[BDM[Double]]
-        val omniPval = omniOpt("PVAL").asInstanceOf[BDM[Double]]
+    // Compute the statistics
+    val omniOpt = omni_SgZ_test(Zscores, DF_opt, WT_opt, M)
 
-        // Return properly typed result
-        Map("STAT" -> omniStat, "PVAL" -> omniPval)
-    }
+    // Ensure omniOpt Map values are properly typed
+    val omniStat = omniOpt("STAT").asInstanceOf[BDM[Double]]
+    val omniPval = omniOpt("PVAL").asInstanceOf[BDM[Double]]
 
-    def BSF_test_byP (
-        Pvalues: BDV[Double],
-        Zsigns: BDV[Double],
-        M: BDM[Double],
-        Bstar: BDV[Double],
-        PI: BDV[Double]
-    ): Map[String, BDM[Double]] = {
-        val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
-        BSF_test(Zscores, M, Bstar, PI)
-    }
+    // Return properly typed result
+    Map("STAT" -> omniStat, "PVAL" -> omniPval)
+  }
 
-    def BSF_cctP_test (
-        Pvalues: BDV[Double],
-        Zscores: BDV[Double],
-        M: BDM[Double],
-        Bstar: BDV[Double],
-        PI: BDV[Double]
-    ): Map[String, BDM[Double]] = {
-        val bsf = BSF_test(Zscores, M, Bstar, PI)
+  def BSF_test_byP (
+    Pvalues: BDV[Double],
+    Zsigns: BDV[Double],
+    M: BDM[Double],
+    Bstar: BDV[Double],
+    PI: BDV[Double]
+  ): Map[String, BDM[Double]] = {
+    val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
+    BSF_test(Zscores, M, Bstar, PI)
+  }
 
-        val cct = cctTest(Pvalues)
-        val cctStat = cct("cct").asInstanceOf[Double]
-        val cctP = cct("pval_cct").asInstanceOf[Double]
+  def BSF_cctP_test (
+    Pvalues: BDV[Double],
+    Zscores: BDV[Double],
+    M: BDM[Double],
+    Bstar: BDV[Double],
+    PI: BDV[Double]
+  ): Map[String, BDM[Double]] = {
+    val bsf = BSF_test(Zscores, M, Bstar, PI)
 
-        // Extract STAT and PVAL matrices from the map
-        val STAT = bsf("STAT").asInstanceOf[BDM[Double]]
-        val PVAL = bsf("PVAL").asInstanceOf[BDM[Double]]
+    val cct = cctTest(Pvalues)
+    val cctStat = cct("cct").asInstanceOf[Double]
+    val cctP = cct("pval_cct").asInstanceOf[Double]
 
-        val PVAL_Vec = PVAL.toDenseVector
+    // Extract STAT and PVAL matrices from the map
+    val STAT = bsf("STAT").asInstanceOf[BDM[Double]]
+    val PVAL = bsf("PVAL").asInstanceOf[BDM[Double]]
 
-        val newPVAL = BDV.vertcat(PVAL_Vec(0 until PVAL.size - 1), BDV(cctP))
-        val bsf_cctP = cctTest(newPVAL)
+    val PVAL_Vec = PVAL.toDenseVector
 
-        val bsf_cctP_stat = bsf_cctP("cct").asInstanceOf[Double]
-        val bsf_cctP_pval = bsf_cctP("pval_cct").asInstanceOf[Double]
+    val newPVAL = BDV.vertcat(PVAL_Vec(0 until PVAL.size - 1), BDV(cctP))
+    val bsf_cctP = cctTest(newPVAL)
 
-        val cctStatMat = BDM.fill(1, 1)(cctStat)
-        val bsf_cctP_statMat = BDM.fill(1, 1)(bsf_cctP_stat)
-        val cctPMat = BDM.fill(1, 1)(cctP)
-        val bsf_cctP_pvalMat = BDM.fill(1, 1)(bsf_cctP_pval)
+    val bsf_cctP_stat = bsf_cctP("cct").asInstanceOf[Double]
+    val bsf_cctP_pval = bsf_cctP("pval_cct").asInstanceOf[Double]
 
-        val result_stat = BDM.vertcat(STAT, cctStatMat, bsf_cctP_statMat)
-        val result_pval = BDM.vertcat(PVAL.asInstanceOf[BDM[Double]], cctPMat, bsf_cctP_pvalMat)
+    val cctStatMat = BDM.fill(1, 1)(cctStat)
+    val bsf_cctP_statMat = BDM.fill(1, 1)(bsf_cctP_stat)
+    val cctPMat = BDM.fill(1, 1)(cctP)
+    val bsf_cctP_pvalMat = BDM.fill(1, 1)(bsf_cctP_pval)
 
-        Map("STAT" -> result_stat, "PVAL" -> result_pval)
-    }
+    val result_stat = BDM.vertcat(STAT, cctStatMat, bsf_cctP_statMat)
+    val result_pval = BDM.vertcat(PVAL.asInstanceOf[BDM[Double]], cctPMat, bsf_cctP_pvalMat)
 
-    def BSF_cctP_test_byP (
-        Pvalues: BDV[Double],
-        Zsigns: BDV[Double],
-        M: BDM[Double],
-        Bstar: BDV[Double],
-        PI: BDV[Double]
-    ): Map[String, BDM[Double]] = {
-        val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
-        BSF_cctP_test(Pvalues, Zscores, M, Bstar, PI)
-    }
+    Map("STAT" -> result_stat, "PVAL" -> result_pval)
+  }
+
+  def BSF_cctP_test_byP (
+    Pvalues: BDV[Double],
+    Zsigns: BDV[Double],
+    M: BDM[Double],
+    Bstar: BDV[Double],
+    PI: BDV[Double]
+  ): Map[String, BDM[Double]] = {
+    val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
+    BSF_cctP_test(Pvalues, Zscores, M, Bstar, PI)
+  }
 }

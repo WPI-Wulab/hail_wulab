@@ -4,7 +4,7 @@ import is.hail.GaussKronrod
 
 import breeze.linalg.{DenseVector => BDV, DenseMatrix => BDM, _}
 import breeze.numerics.{abs, sqrt}
-
+import breeze.stats.{stddev}
 import net.sourceforge.jdistlib.Normal
 
 import org.apache.commons.math3.util.CombinatoricsUtils.factorialDouble
@@ -334,31 +334,6 @@ object OptimalWeights {
   def getRTilde(g: (Double) => Double, mu: BDV[Double], sd: BDV[Double]): BDV[Double] = {
     val n = mu.size
     return BDV.tabulate(n){(i) => E_gX_p(g, mu(i),  1.0, sd(i)) - E_gX_p(g, 0.0, 1.0, 1.0) }
-  }
-
-  def getH_Continuous(X: BDM[Double], y: BDV[Double]): (BDM[Double], Double, BDV[Double]) = {
-    // compute solution to X * beta = y, manually calculate residuals
-    val n = y.length
-    // val XIntercept = BDM.horzcat(BDM.ones[Double](n, 1), X)
-    // val beta = lin_solve(XIntercept, y)
-    // val yPred = (XIntercept * beta)
-
-    val yPred = lin_reg_predict(X, y, method="direct", addIntercept=true)
-    val resids = y - yPred
-
-    val sd = sqrt(sum((resids - mean(resids)) ^:^ 2.0) / (n - 1.0))
-    val HHalf = X * (cholesky(inv(X.t * X)))
-    return(HHalf, sd, resids)
-  }
-
-  def getH_Binary(X: BDM[Double], y: BDV[Double]): (BDM[Double], BDV[Double], BDV[Double]) = {
-    val y0 = log_reg_predict(X, y)
-    val resids = y - y0
-
-    val XTilde = sqrt(y0 *:* (1.0-y0)) *:* X(::,*)
-    val HHalf = XTilde * cholesky(inv(XTilde.t * XTilde))
-
-    return((HHalf, y0, resids))
   }
 
 

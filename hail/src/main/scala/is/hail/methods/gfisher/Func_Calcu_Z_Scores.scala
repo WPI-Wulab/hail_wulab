@@ -11,9 +11,11 @@ Last update (latest update first):
 package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
-import breeze.numerics.sqrt
-// import breeze.stats._
+import breeze.numerics.{sqrt, signum}
+
 import is.hail.methods.gfisher.OptimalWeights.{getGHG_Binary, getGHG_Binary2, getGHG_Continuous}
+import net.sourceforge.jdistlib.Normal
+
 object FuncCalcuZScores {
 
   /*
@@ -78,7 +80,7 @@ object FuncCalcuZScores {
     G: BDM[Double],
     X: BDM[Double],
     Y: BDV[Double],
-    binary: Boeal = false,
+    binary: Boolean = false,
     use_lm_t: Boolean = false
   ): Map[String, Any] = {
 
@@ -119,6 +121,7 @@ object FuncCalcuZScores {
         "s0" -> s0
       )
   }
+}
 
   def getZ_marg_score_binary_SPA (
     G: BDM[Double],
@@ -168,7 +171,7 @@ object FuncCalcuZScores {
       "s0" -> s0
     )
   }
-}
+
 
   /**
    * Get the standardized marginal score statistics

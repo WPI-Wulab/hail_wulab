@@ -7,7 +7,6 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
 import breeze.numerics.{abs, sqrt, sigmoid}
 import breeze.optimize.{DiffFunction, minimize}
 import net.sourceforge.jdistlib.{ChiSquare, Normal}
-import is.hail.types.physical.PStruct
 
 package object gfisher {
 
@@ -167,7 +166,6 @@ package object gfisher {
 
 
 
-  def mean(x: BDV[Double]): Double = sum(x) / x.size
 
   /**
     * Uses method described in the _linear_skat function in statgen.py to directly compute the predicted values of the best fit model y = Xb
@@ -222,13 +220,16 @@ package object gfisher {
     }
   }
 
-  def stdErrLinearRegression3(X: BDM[Double], y: BDV[Double]): BDV[Double] = {
+  def stdErrLinearRegression(X: BDM[Double], y: BDV[Double]): (BDV[Double], BDV[Double], BDV[Double]) = {
     val QR = qr.reduced(X)
-    val yhat = QR.q * QR.q.t * y
+    val Qt = QR.q.t
+    val R = QR.r
+    val beta = R \ (Qt * y)
+    val yhat = X * beta
     val residuals: BDV[Double] = y - yhat
     val sigma2: Double = (residuals dot residuals) / (X.rows - X.cols)
-    val se: BDV[Double] = sqrt(diag(inv(QR.r.t * QR.r)) * sigma2)
-    return se
+    val se: BDV[Double] = sqrt(diag(inv(R.t * R)) * sigma2)
+    return (beta, se, residuals)
   }
 
 
