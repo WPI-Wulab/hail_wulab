@@ -413,7 +413,7 @@ object GFisherDataPrep {
 
         //check fields defined
         val fieldsDefined = rowProcessor.checkFieldsDefined()
-        if (!fieldsDefined) {//[Wu: What is the code logic here? It reads like it returns None if fields are defined, but it should return None if fields are not defined.]
+        if (!fieldsDefined) {
           None
         }
 
