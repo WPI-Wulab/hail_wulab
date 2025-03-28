@@ -165,12 +165,6 @@ package object gfisher {
     return res
   }
 
-  def getFieldIds(fullRowType: PStruct, fieldNames: String*): Array[Int] = {
-    val idxs = new Array[Int](fieldNames.length)
-    for (i <- 0 until fieldNames.length)
-      idxs(i) = fullRowType.field(fieldNames(i)).index
-    return idxs
-  }
 
 
   def mean(x: BDV[Double]): Double = sum(x) / x.size

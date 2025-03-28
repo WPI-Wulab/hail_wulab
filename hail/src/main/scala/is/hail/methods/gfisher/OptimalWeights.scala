@@ -23,11 +23,8 @@ object OptimalWeights {
     forcePositiveWeights: Boolean=true
   ): BDM[Double] = {
     val (bStar, gHG) = if (binary) {
-      val (hH, y0, _) = getH_Binary(X, y)
-      val GTilde = sqrt(y0 *:* (1.0 - y0)) *:* G(::, *)
-      val GHalf = GTilde.t * hH
-      val GHG = GTilde.t * GTilde - GHalf * GHalf.t
-      (sqrt(diag(GHG)) *:* b, GHG)
+      val (ghg, _, _ ) = getGHG_Binary2(G, X, y)
+      (sqrt(diag(ghg)) *:* b, ghg)
     } else {
       val (hH, s0, _) = getH_Continuous(X, y)
       val GHalf = G.t * hH
@@ -113,6 +110,51 @@ object OptimalWeights {
     wts_BE := wts_BE / (sum(abs(wts_BE)) / n)
     wts_APE := wts_APE / (sum(abs(wts_APE)) / n)
     return BDM(wts_BE, wts_APE)
+  }
+
+  def getGHG_Binary(G: BDM[Double], HHalf: BDM[Double], y0: BDV[Double]): BDM[Double] = {
+    val GTilde = sqrt(y0 *:* (1.0 - y0)) *:* G(::, *)
+    val GHalf = GTilde.t * HHalf
+    return GTilde.t * GTilde - GHalf * GHalf.t
+  }
+
+  def getGHG_Binary2(G: BDM[Double], X: BDM[Double], y: BDV[Double]): (BDM[Double], BDV[Double], BDV[Double]) = {
+    val (hH, y0, resids) = getH_Binary(X, y)
+    val GTilde = sqrt(y0 *:* (1.0 - y0)) *:* G(::, *)
+    val GHalf = GTilde.t * hH
+    return (GTilde.t * GTilde - GHalf * GHalf.t, y0, resids)
+  }
+
+  def getGHG_Continuous(G: BDM[Double], HHalf: BDM[Double]): BDM[Double] = {
+    val GHalf = G.t * HHalf
+    return G.t * G - GHalf * GHalf.t
+  }
+
+  def getGHG_Continuous(G: BDM[Double], X: BDM[Double], y: BDV[Double]): (BDM[Double], Double, BDV[Double]) = {
+    val (hH, s0, resids) = getH_Continuous(X, y)
+    val GHalf = G.t * hH
+    return (G.t * G - GHalf * GHalf.t, s0, resids)
+  }
+
+  def getH_Continuous(X: BDM[Double], y: BDV[Double]): (BDM[Double], Double, BDV[Double]) = {
+    // compute solution to X * beta = y, manually calculate residuals
+
+    val yPred = lin_reg_predict(X, y, method="direct", addIntercept=true)
+    val resids = y - yPred
+
+    val sd = stddev(resids)
+    val HHalf = X * (cholesky(inv(X.t * X)))
+    return(HHalf, sd, resids)
+  }
+
+  def getH_Binary(X: BDM[Double], y: BDV[Double]): (BDM[Double], BDV[Double], BDV[Double]) = {
+    val y0 = log_reg_predict(X, y)
+    val resids = y - y0
+
+    val XTilde = sqrt(y0 *:* (1.0-y0)) *:* X(::,*)
+    val HHalf = XTilde * cholesky(inv(XTilde.t * XTilde))
+
+    return (HHalf, y0, resids)
   }
 
 

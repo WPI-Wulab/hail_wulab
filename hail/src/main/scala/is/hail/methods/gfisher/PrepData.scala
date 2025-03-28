@@ -20,27 +20,42 @@ import org.apache.spark.rdd.RDD
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 
-abstract class GFisherTuple(pval: Double)
+/**
+  * These tuples store the data stored in a single row (SNP) of the input MatrixTable
+  *
+  * @param pval
+  */
+trait GTuple
 
-//[ZWu: df can be non-integer, and we should keep this generality. See the R function pchisq.]
-case class GFisherTupleCorr(rowIdx: Int, pval: Double, df: Double, weight: Double, corrArr: Array[Double]) extends GFisherTuple(pval)
+case class GFisherTupleCorr(rowIdx: Int, pval: Double, df: Double, weight: Double, corrArr: Array[Double]) extends GTuple
 
-case class GFisherTupleGeno(pval: Double, df: Double, weight: Double, genoArr: Array[Double]) extends GFisherTuple(pval)
+case class GFisherTupleGeno(pval: Double, df: Double, weight: Double, genoArr: Array[Double]) extends GTuple
 
-case class OGFisherTupleCorr(rowIdx: Int, pval: Double, df: Array[Double], weight: Array[Double], corrArr: Array[Double]) extends GFisherTuple(pval)
+case class OGFisherTupleCorr(rowIdx: Int, pval: Double, df: Array[Double], weight: Array[Double], corrArr: Array[Double]) extends GTuple
 
-case class OGFisherTupleGeno(pval: Double, df: Array[Double], weight: Array[Double], genoArr: Array[Double]) extends GFisherTuple(pval)
+case class OGFisherTupleGeno(pval: Double, df: Array[Double], weight: Array[Double], genoArr: Array[Double]) extends GTuple
 
+case class GLOWTuple(b: Double, pi: Double, genoArr: Array[Double]) extends GTuple
+
+/**
+  * These classes are used to store the indexes of the fields in the input MatrixTable
+  */
 trait FieldIndexes{
+  def key: Int
+}
+
+trait GFisherFieldIdxs extends FieldIndexes{
   def key: Int
   def pval: Int
   def df: Int
   def weight: Int
 }
 
-case class GFisherCorrFieldIdxs(key:Int, rowIdx: Int, pval: Int, df:Int, weight: Int, corrArr: Int) extends FieldIndexes
+case class GFisherCorrFieldIdxs(key:Int, rowIdx: Int, pval: Int, df:Int, weight: Int, corrArr: Int) extends GFisherFieldIdxs
 
-case class GFisherGenoFieldIdxs(key:Int, pval: Int, df:Int, weight: Int, geno: Int, entryArray: Int) extends FieldIndexes
+case class GFisherGenoFieldIdxs(key:Int, pval: Int, df:Int, weight: Int, geno: Int, entryArray: Int) extends GFisherFieldIdxs
+
+case class GLOWFieldIdxs(key: Int, b: Int, pi: Int, geno: Int, entryArray: Int) extends FieldIndexes
 
 abstract class GRowProcessor(
   fullRowType: PStruct,
@@ -49,10 +64,7 @@ abstract class GRowProcessor(
 ) {
 
   def checkFieldsDefined(): Boolean = {
-    return fullRowType.isFieldDefined(ptr, fieldIds.key) &&
-      fullRowType.isFieldDefined(ptr, fieldIds.pval) &&
-      fullRowType.isFieldDefined(ptr, fieldIds.df) &&
-      fullRowType.isFieldDefined(ptr, fieldIds.weight)
+    return fullRowType.isFieldDefined(ptr, fieldIds.key)
   }
   def getDouble(idx: Int):Double = {
     Region.loadDouble(fullRowType.loadField(ptr, idx))
@@ -98,7 +110,7 @@ abstract class GRowProcessor(
     return data
   }
 
-  def getData(ctx: RVDContext): Option[(Annotation, GFisherTuple)]
+  def getData(ctx: RVDContext): Option[(Annotation, GTuple)]
 }
 
 abstract class GRowProcessorEntry(
@@ -107,17 +119,37 @@ abstract class GRowProcessorEntry(
   fieldIds: FieldIndexes,
   entryArrayType:PArray,
   entryType: PStruct,
+  completeColIdx: Array[Int],
   nCols: Int
 ) extends GRowProcessor(fullRowType, ptr, fieldIds) {
-  def getEntryArray(idx: Int, entryArrayIdx: Int, n: Int): Array[Double] = {
 
-    val data = new Array[Double](n)// array that will hold the genotype data
+  def this(
+    fullRowType: PStruct,
+    ptr: Long,
+    fieldIds: FieldIndexes,
+    entryArrayType:PArray,
+    entryType: PStruct,
+    completeColIdx: Array[Int],
+  ) = this(fullRowType, ptr, fieldIds, entryArrayType, entryType, completeColIdx, completeColIdx.length)
+
+  def this(
+    fullRowType: PStruct,
+    ptr: Long,
+    fieldIds: FieldIndexes,
+    entryArrayType:PArray,
+    entryType: PStruct,
+    nCols: Int,
+  ) = this(fullRowType, ptr, fieldIds, entryArrayType, entryType, (0 until nCols).toArray, nCols)
+
+  def getEntryArray(idx: Int, entryArrayIdx: Int): Array[Double] = {
+
+    val data = new Array[Double](nCols)// array that will hold the genotype data
 
     // get the genotype values and make sure they aren't all missing/NaN
     RegressionUtils.setMeanImputedDoubles(
       data,
       0,
-      (0 until n).toArray,
+      completeColIdx,
       new IntArrayBuilder(),
       ptr,
       fullRowType,
@@ -130,12 +162,29 @@ abstract class GRowProcessorEntry(
   }
 }
 
+abstract class GFisherRowProcessor(
+  fullRowType: PStruct,
+  ptr: Long,
+  fieldIds: GFisherFieldIdxs,
+) extends GRowProcessor(fullRowType, ptr, fieldIds) {
+
+  override def checkFieldsDefined(): Boolean = {
+     super.checkFieldsDefined() &&
+      fullRowType.isFieldDefined(ptr, fieldIds.pval) &&
+      fullRowType.isFieldDefined(ptr, fieldIds.df) &&
+      fullRowType.isFieldDefined(ptr, fieldIds.weight)
+  }
+
+}
+
+
+
 class GFisherCorrRowProcessor(
   fullRowType: PStruct,
   ptr: Long,
   fieldIds: GFisherCorrFieldIdxs,
   nRows: Int
-) extends GRowProcessor(fullRowType, ptr, fieldIds) {
+) extends GFisherRowProcessor(fullRowType, ptr, fieldIds) {
   override def checkFieldsDefined(): Boolean = {
     super.checkFieldsDefined() &&
       fullRowType.isFieldDefined(ptr, fieldIds.rowIdx) &&
@@ -164,12 +213,18 @@ class GFisherGenoRowProcessor(
   nCols: Int
 ) extends GRowProcessorEntry(fullRowType, ptr, fieldIds, entryArrayType, entryType, nCols) {
 
+  override def checkFieldsDefined(): Boolean = {
+    super.checkFieldsDefined() &&
+      fullRowType.isFieldDefined(ptr, fieldIds.pval) &&
+      fullRowType.isFieldDefined(ptr, fieldIds.df) &&
+      fullRowType.isFieldDefined(ptr, fieldIds.weight)
+  }
   override def getData(ctx: RVDContext): Option[(Annotation, GFisherTupleGeno)] = {
     val key = getKey(ctx)
     val pval = getDouble(fieldIds.pval)
     val df = getDouble(fieldIds.df)
     val weight = getDouble(fieldIds.weight)
-    val genoArr = getEntryArray(fieldIds.geno, fieldIds.entryArray, nCols)
+    val genoArr = getEntryArray(fieldIds.geno, fieldIds.entryArray)
     if (genoArr.distinct.length == 1)
       return None
     return Some((key, new GFisherTupleGeno(pval=pval, df=df, weight=weight, genoArr=genoArr)))
@@ -182,7 +237,7 @@ class OGFisherCorrRowProcessor(
   fieldIds: GFisherCorrFieldIdxs,
   nRows: Int,
   nTests: Int
-) extends GRowProcessor(fullRowType, ptr, fieldIds) {
+) extends GFisherRowProcessor(fullRowType, ptr, fieldIds) {
 
   override def checkFieldsDefined(): Boolean = {
     super.checkFieldsDefined() &&
@@ -213,21 +268,94 @@ class OGFisherGenoRowProcessor(
   nTests: Int
 ) extends GRowProcessorEntry(fullRowType, ptr, fieldIds, entryArrayType, entryType, nCols) {
 
+  override def checkFieldsDefined(): Boolean = {
+    super.checkFieldsDefined() &&
+      fullRowType.isFieldDefined(ptr, fieldIds.pval) &&
+      fullRowType.isFieldDefined(ptr, fieldIds.df) &&
+      fullRowType.isFieldDefined(ptr, fieldIds.weight)
+  }
+
   override def getData(ctx: RVDContext): Option[(Annotation, OGFisherTupleGeno)] = {
     val key = getKey(ctx)
     val pval = getDouble(fieldIds.pval)
     val df = getDoubleArray(fieldIds.df)
     val weight = getDoubleArray(fieldIds.weight)
-    val genoArr = getEntryArray(fieldIds.geno, fieldIds.entryArray, nCols)
+    val genoArr = getEntryArray(fieldIds.geno, fieldIds.entryArray)
     if (genoArr.distinct.length == 1)
       return None
     return Some((key, new OGFisherTupleGeno(pval=pval, df=df, weight=weight, genoArr=genoArr)))
   }
 }
 
+class GLOWRowProcessor(
+  fullRowType: PStruct,
+  ptr: Long,
+  fieldIds: GLOWFieldIdxs,
+  entryArrayType:PArray,
+  entryType: PStruct,
+  completeColIdx: Array[Int],
+  nCols: Int
+) extends GRowProcessorEntry(fullRowType, ptr, fieldIds, entryArrayType, entryType, completeColIdx, nCols) {
 
+  override def checkFieldsDefined(): Boolean = {
+    super.checkFieldsDefined() &&
+      fullRowType.isFieldDefined(ptr, fieldIds.b) &&
+      fullRowType.isFieldDefined(ptr, fieldIds.pi)
+  }
+
+  override def getData(ctx: RVDContext): Option[(Annotation, GLOWTuple)] = {
+    val key = getKey(ctx)
+    val b = getDouble(fieldIds.b)
+    val pi = getDouble(fieldIds.pi)
+    val genoArr = getEntryArray(fieldIds.geno, fieldIds.entryArray)
+    if (genoArr.distinct.length == 1)
+      return None
+    return Some((key, new GLOWTuple(b, pi, genoArr)))
+  }
+}
 
 object GFisherDataPrep {
+
+  def getFieldIds(fullRowType: PStruct, fieldNames: String*): Array[Int] = {
+    val idxs = new Array[Int](fieldNames.length)
+    for (i <- 0 until fieldNames.length)
+      idxs(i) = fullRowType.field(fieldNames(i)).index
+    return idxs
+  }
+
+  def prepGlowRDD(
+    mv: MatrixValue,
+    keyField: String,
+    bField: String,
+    piField: String,
+    genoField: String,
+    completeColIdx: Array[Int],
+  ): RDD[(Annotation, Iterable[GLOWTuple])] = {
+    val fullRowType = mv.rvRowPType //PStruct
+    val ids = getFieldIds(fullRowType, keyField, bField, piField)
+    val entryArrayType = mv.entryArrayPType
+    val entryType = mv.entryPType
+    val entryArrayIdx = mv.entriesIdx
+    val genoFieldIdx = entryType.fieldIdx(genoField)
+
+    val fieldIds = new GLOWFieldIdxs(ids(0), ids(1), ids(2), genoFieldIdx, entryArrayIdx)
+    val fieldIdsBC = HailContext.backend.broadcast(fieldIds)
+    val completeColIdxBC = HailContext.backend.broadcast(completeColIdx)
+    mv.rvd.mapPartitions { (ctx, it) =>
+      it.flatMap { ptr =>
+        val completeCol = completeColIdxBC.value
+
+        val rowProcessor = new GLOWRowProcessor(fullRowType, ptr, fieldIdsBC.value, entryArrayType, entryType, completeCol, completeCol.length)
+        //check fields defined
+        val fieldsDefined = rowProcessor.checkFieldsDefined()
+        if (!fieldsDefined) {
+          None
+        }
+        else
+          rowProcessor.getData(ctx)
+      }
+    }.groupByKey()
+  }
 
   def prepGFisherCorrRDD(
     mv: MatrixValue,
@@ -248,8 +376,8 @@ object GFisherDataPrep {
       it.flatMap { ptr =>
         val rowProcessor = new GFisherCorrRowProcessor(fullRowType, ptr, fieldIdsBC.value, nRows)
         //check fields defined
-        val fieldsDefined = rowProcessor.checkFieldsDefined
-        if (fieldsDefined) {
+        val fieldsDefined = rowProcessor.checkFieldsDefined()
+        if (!fieldsDefined) {
           None
         }
 
@@ -284,8 +412,8 @@ object GFisherDataPrep {
         val rowProcessor = new GFisherGenoRowProcessor(fullRowType, ptr, fieldIdsBC.value, entryArrayType, entryType, nCols)
 
         //check fields defined
-        val fieldsDefined = rowProcessor.checkFieldsDefined
-        if (fieldsDefined) {//[Wu: What is the code logic here? It reads like it returns None if fields are defined, but it should return None if fields are not defined.]
+        val fieldsDefined = rowProcessor.checkFieldsDefined()
+        if (!fieldsDefined) {//[Wu: What is the code logic here? It reads like it returns None if fields are defined, but it should return None if fields are not defined.]
           None
         }
 
@@ -313,10 +441,9 @@ object GFisherDataPrep {
     mv.rvd.mapPartitions { (ctx, it) =>
       it.flatMap { ptr =>
         val rowProcessor = new OGFisherCorrRowProcessor(fullRowType, ptr, fieldIdsBC.value, nRows, nTests)
-
         //check fields defined
-        val fieldsDefined = rowProcessor.checkFieldsDefined
-        if (fieldsDefined) {
+        val fieldsDefined = rowProcessor.checkFieldsDefined()
+        if (!fieldsDefined) {
           None
         }
 
@@ -345,14 +472,13 @@ object GFisherDataPrep {
 
     val fieldIdsBC = HailContext.backend.broadcast(fieldIds)
     val nCols = mv.nCols
-
     mv.rvd.mapPartitions { (ctx, it) =>
       it.flatMap { ptr =>
         val rowProcessor = new OGFisherGenoRowProcessor(fullRowType, ptr, fieldIdsBC.value, entryArrayType, entryType, nCols, nTests)
-
         //check fields defined
-        val fieldsDefined = rowProcessor.checkFieldsDefined
-        if (fieldsDefined) {
+        val fieldsDefined = rowProcessor.checkFieldsDefined()
+        if (! fieldsDefined) {
+          // print("FIELD NOT DEFINED")
           None
         }
 
@@ -643,5 +769,28 @@ object GFisherArrayToVectors {
     val G = new BDM(m, n, genoArr)
     val M = rowCorrelation(G)
     return (pval, df, weight, M)
+  }
+
+  /**
+    * Used to convert the iterable of rows in a group to a set of vectors and matrices for GLOW.
+    *
+    * @param tups iterable of rows in a group
+    * @return tuple containing vector of B (length nSNPs), vector of PI (length nSNPs), and genotype matrix of dimension nSamples x nSNPs
+    */
+  def glow(tups: Array[GLOWTuple]): (BDV[Double], BDV[Double], BDM[Double]) = {
+    require(tups.nonEmpty)
+    val g0 = tups(0).genoArr
+    val nSamples = g0.length
+    val nSNPs = tups.length
+    val bArr = new Array[Double](nSNPs)
+    val piArr = new Array[Double](nSNPs)
+    val genoArr = new Array[Double](nSNPs * nSamples)
+    for (i <- (0 until nSNPs)) {
+      val t = tups(i)
+      bArr(i) = t.b
+      piArr(i) = t.pi
+      System.arraycopy(t.genoArr, 0, genoArr, i*nSamples, nSamples)
+    }
+    return (BDV(bArr), BDV(piArr), new BDM(nSamples, nSNPs, genoArr))
   }
 }
