@@ -88,9 +88,9 @@ case class GLOW(
         // printVec(b, s"$key b")
         // printVec(pi, s"$key pi")
         // printMat(geno, s"$key geno")
-        val GHG = OptimalWeights.getGHG_Continuous(geno, HhalfBC.value)
+        // val GHG = OptimalWeights.getGHG_Continuous(geno, HhalfBC.value)
         // printMat(GHG, s"$key: GHG")
-        val score = geno.t * residsBC.value / s0BC.value
+        // val score = geno.t * residsBC.value / s0BC.value
         // printVec(score, s"$key: score")
 
         val zstats = getZMargScoreContinuous(geno, HhalfBC.value, s0BC.value, residsBC.value)
