@@ -10,6 +10,42 @@ import net.sourceforge.jdistlib.{ChiSquare, Normal}
 
 package object gfisher {
 
+  def vecDiff(x: BDV[Double], y: BDV[Double]): Unit = {
+    val d = abs(x - y)
+    printVec(d)
+  }
+
+  def printVec(x: BDV[Double], name: String = ""): Unit = {
+    val s = x.data.map(i => f"$i%.2e").mkString("[", ", ", "]")
+    if (name == ""){
+      println(s)
+    } else {
+      println(s"$name: $s")
+    }
+  }
+
+  def matDiff(X: BDM[Double], Y: BDM[Double]): Unit = {
+    val mat = abs(X - Y)
+    printMat(mat)
+  }
+
+  def printMat(mat: BDM[Double], name: String="") = {
+   val rows = for (i <- 0 until mat.rows) yield {
+      (0 until mat.cols).map(j => f"${mat(i, j)}%.2e").mkString("[", ", ", "]")
+    }
+    val linesep = if(name == "" ){
+      "\n"
+    } else {
+      s"\n$name: "
+    }
+    val s = rows.mkString(linesep)
+    if (name == ""){
+      println(s)
+    } else {
+      println(s"$name: $s")
+    }
+  }
+
   def all[T](vals: Iterable[T], condition: (T) => Boolean): Boolean = {
     for (x <- vals) {
       if (!condition(x)) {

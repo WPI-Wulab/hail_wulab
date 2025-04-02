@@ -1,5 +1,5 @@
 from .family_methods import de_novo, mendel_errors, transmission_disequilibrium_test, trio_matrix
-from .glow import estimate_b, estimate_pi, get_best_b_model, get_pi_models
+from .glow import estimate_b, estimate_pi, get_best_b_model, get_pi_models, get_z_marg
 from .impex import (
     export_bgen,
     export_elasticsearch,
@@ -77,6 +77,7 @@ from .statgen import (
 
 __all__ = [
     'trio_matrix',
+    'get_z_marg',
     'get_best_b_model',
     'estimate_b',
     'estimate_pi',

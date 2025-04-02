@@ -4,7 +4,7 @@ import is.hail.backend.ExecuteContext
 import is.hail.expr.ir.{MatrixValue, RelationalSpec, TableValue}
 import is.hail.linalg.BlockMatrix
 import is.hail.methods._
-import is.hail.methods.gfisher.{GFisher, OGFisher}
+import is.hail.methods.gfisher.{GFisher, OGFisher, GLOW}
 import is.hail.types.{RTable, TypeWithRequiredness}
 import is.hail.types.virtual.{BlockMatrixType, MatrixType, TableType, Type}
 import is.hail.utils._
@@ -137,6 +137,7 @@ object RelationalFunctions {
       classOf[SimpleGroupSum],
       classOf[GFisher],
       classOf[OGFisher],
+      classOf[GLOW],
     ),
     typeHintFieldName = "name",
   )

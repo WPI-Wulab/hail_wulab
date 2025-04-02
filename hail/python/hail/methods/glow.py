@@ -13,6 +13,58 @@ from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
 from pyspark.sql import DataFrame
 from pyspark.sql.window import Window
 
+from hail import ir
+from hail.expr import expr_any, expr_float64, matrix_table_source
+from hail.table import Table
+from hail.typecheck import sequenceof, typecheck
+from hail.utils.java import Env
+
+
+@typecheck(
+    key=expr_any,
+    b=expr_float64,
+    pi=expr_float64,
+    geno=expr_float64,
+    covariates=sequenceof(expr_float64),
+    pheno=expr_float64,
+    logistic=bool,
+)
+def get_z_marg(key, b, pi, geno, covariates, pheno, logistic):
+    # TODO check that fields are correct type and from the correct mt
+
+    mt = matrix_table_source("gfisher", key)
+    key_name_out = mt._fields_inverse[key] if key in mt._fields_inverse else "id"
+
+    row_exprs = {'__key': key, '__b': b, '__pi': pi}
+
+    # FIXME: remove this logic when annotation is better optimized
+    if geno in mt._fields_inverse:
+        x_field_name = mt._fields_inverse[geno]
+        entry_expr = {}
+    else:
+        x_field_name = Env.get_uid()
+        entry_expr = {x_field_name: geno}
+
+    y_field_name = '__y'
+    cov_field_names = list(f'__cov{i}' for i in range(len(covariates)))
+    mt = mt._select_all(
+        col_exprs=dict(**{y_field_name: pheno}, **dict(zip(cov_field_names, covariates))),
+        row_exprs=row_exprs,
+        entry_exprs=entry_expr,
+    )
+    config = {
+        "name": "GLOW",
+        "keyField": "__key",
+        "keyFieldOut": key_name_out,
+        "bField": "__b",
+        "piField": '__pi',
+        'genoField': x_field_name,
+        'covFields': cov_field_names,
+        "phenoField": y_field_name,
+        "logistic": logistic,
+    }
+    return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
+
 
 class _BTransformer(Transformer):
     def __init__(self, inputCol: str):

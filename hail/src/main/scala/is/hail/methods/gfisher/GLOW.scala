@@ -31,7 +31,7 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
   * @param method which method to use. Either HYB, MR, or GB
   * @param oneSided whether the input p-values are one-sided
   */
-case class Glow(
+case class GLOW(
   keyField: String,
   keyFieldOut: String,
   bField: String,
@@ -47,7 +47,7 @@ case class Glow(
     val mySchema = TStruct(
       (keyFieldOut, keyType),
       ("n", TInt32),
-      ("zstat", TArray(TFloat64)),
+      ("Zstat", TArray(TFloat64)),
     )
     TableType(mySchema, FastSeq(keyFieldOut), TStruct.empty)
   }
@@ -74,17 +74,27 @@ case class Glow(
     }
 
     val groupedRDD = GFisherDataPrep.prepGlowRDD(mv, keyField, bField, piField, genoField, completeColIdx)
-
+    printMat(cov, "cov")
     def linearGlow() = {
       val (hH, s0, resids) = getH_Continuous(cov, y)
       val HhalfBC = HailContext.backend.broadcast(hH)
       val s0BC = HailContext.backend.broadcast(s0)
       val residsBC = HailContext.backend.broadcast(resids)
+      // printVec(resids, "resids")
       groupedRDD.map{case(key, vals) =>
         val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
         val n = valArr.length
         val (b: BDV[Double], pi: BDV[Double], geno: BDM[Double]) = GFisherArrayToVectors.glow(valArr)
+        // printVec(b, s"$key b")
+        // printVec(pi, s"$key pi")
+        // printMat(geno, s"$key geno")
+        val GHG = OptimalWeights.getGHG_Continuous(geno, HhalfBC.value)
+        // printMat(GHG, s"$key: GHG")
+        val score = geno.t * residsBC.value / s0BC.value
+        // printVec(score, s"$key: score")
+
         val zstats = getZMargScoreContinuous(geno, HhalfBC.value, s0BC.value, residsBC.value)
+        // printVec(zstats("Zscores").asInstanceOf[BDV[Double]], s"$key: zscores")
 
         Row(key, n, zstats("Zscores").asInstanceOf[BDV[Double]].data.toFastSeq)
       }
@@ -97,10 +107,11 @@ case class Glow(
       val residsBC = HailContext.backend.broadcast(resids)
       groupedRDD.map{case(key, vals) =>
         val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
-
+        val n = valArr.length
         val (b: BDV[Double], pi: BDV[Double], geno: BDM[Double]) = GFisherArrayToVectors.glow(valArr)
+
         val zstats = getZMargScoreBinary(geno, HhalfBC.value, y0BC.value, residsBC.value)
-        Row(key, n, zstats("Zscores").asInstanceOf[BDV[Double]].data.toFastSeq)
+        Row(key, n, zstats("Zscores").asInstanceOf[BDV[Double]].toArray.toFastSeq)
       }
     }
 
