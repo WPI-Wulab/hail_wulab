@@ -1,5 +1,5 @@
 import warnings
-from typing import Optional
+from typing import Any, Optional
 
 import pyspark.sql.functions as sf
 from numpy import logspace
@@ -165,7 +165,7 @@ def estimate_b(
     maf_col_name: str,
     train_binary: bool,
     test_binary: bool,
-    model: Optional[Model] = None,
+    model: Optional[Model | Any] = None,
     train_df: Optional[DataFrame] = None,
     beta_col_name: Optional[str] = None,
     test_se: Optional[str] = None,
@@ -181,7 +181,7 @@ def estimate_b(
         maf_col_name (str): column containing the MAF data in both data sets
         train_binary (bool): whether the training trait was binary
         test_binary (bool): whether the trait of interest is binary
-        model (Model, optional): fitted model to estimate B. If not given, one will be trained with `get_best_b_model` and `train_df`
+        model (Model | Any, optional): fitted model to estimate B. must implement a `transform` method that accepts and returns a pyspark.sql.DataFrame. If not given, one will be trained with `get_best_b_model` and `train_df`
         train_df (DataFrame, optional): training data. required if no model is given.
         beta_col_name (str, optional): column containing the known value of beta in the training data. required if no model is given.
         test_se (str, optional): column containing the standard error of the MAF for the test data. required if `train_binary != test_binary`. Defaults to None.
@@ -230,7 +230,7 @@ def get_pi_models(
     """train models to predict causal likelihood pi based on annotations
 
     Args:
-        train_df (DataFrame, optional): training data..
+        train_df (DataFrame): training data.
         x_col_name (str | list[str], optional): name of the vector features column, or list of the features to be vectorized. if a list, the resulting models will have a feature column of "__features". Defaults to "features".
         y_col_name (str, optional): name of the column indicating whether it is a case or control. Column must contain only binary values, 0 for control and 1 for case. Defaults to "case".
         prediction_col (str, optional): what the models should call their prediction. Defaults to "estimated_pi".
@@ -299,7 +299,7 @@ def get_pi_models(
 
 def estimate_pi(
     test_df: DataFrame,
-    models: Optional[list[Model]] = None,
+    models: Optional[list[Model | Any]] = None,
     prediction_col: Optional[str] = "estimated_pi",
     **kwargs,
 ):
@@ -307,7 +307,7 @@ def estimate_pi(
 
     Args:
         test_df (DataFrame): testing data to estimate pi for
-        models (list[Model], optional): trained models to predict pi with. if not given, models will be trained with `get_pi_models`.
+        models (list[Model], optional): trained models to predict pi with. models must implement a `transform` method that accepts and returns a pyspark.sql.DataFrame. if not given, models will be trained with `get_pi_models`.
         **kwargs: arguments to pass to `get_pi_models`
 
     Returns:
