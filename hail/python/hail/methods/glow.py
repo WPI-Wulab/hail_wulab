@@ -28,8 +28,9 @@ from hail.utils.java import Env
     covariates=sequenceof(expr_float64),
     pheno=expr_float64,
     logistic=bool,
+    method=str,
 )
-def get_z_marg(key, b, pi, geno, covariates, pheno, logistic):
+def glow(key, b, pi, geno, covariates, pheno, logistic: bool, method: str):
     # TODO check that fields are correct type and from the correct mt
 
     mt = matrix_table_source("gfisher", key)
@@ -44,6 +45,9 @@ def get_z_marg(key, b, pi, geno, covariates, pheno, logistic):
     else:
         x_field_name = Env.get_uid()
         entry_expr = {x_field_name: geno}
+    method = method.upper()
+    if method not in ["FISHER", "SKAT", "BURDEN", "OMNI"]:
+        raise ValueError(f"Method must be one of (FISHER, SKAT, BURDEN, OMNI). Got {method}")
 
     y_field_name = '__y'
     cov_field_names = list(f'__cov{i}' for i in range(len(covariates)))
@@ -62,6 +66,7 @@ def get_z_marg(key, b, pi, geno, covariates, pheno, logistic):
         'covFields': cov_field_names,
         "phenoField": y_field_name,
         "logistic": logistic,
+        "method": method,
     }
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 

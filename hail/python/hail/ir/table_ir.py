@@ -1059,7 +1059,7 @@ class MatrixToTableApply(TableIR):
         elif name == "GLOW":
             key_field_out = self.config['keyFieldOut']
             key_type = child_typ.row_type[self.config['keyField']]
-            my_type = hl.dtype(f'struct{{{key_field_out}:{key_type},n:int32,Zstat:array<float64>}}')
+            my_type = hl.dtype(f'struct{{{key_field_out}:{key_type},n:int32,stat:array<float64>,pval:array<float64>}}')
             return hl.ttable(hl.tstruct(), my_type, [key_field_out])
         else:
             assert name == 'LocalLDPrune', name
