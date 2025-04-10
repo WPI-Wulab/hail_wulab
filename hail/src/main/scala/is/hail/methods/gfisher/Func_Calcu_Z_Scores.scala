@@ -42,27 +42,6 @@ object FuncCalcuZScores {
     tStatistic
   }
 
-  def saddleProb(q: Double, mu: BDV[Double], g: BDV[Double]): Double = {
-    // Compute variance (inner product of g * g)
-    val sigmaSq = g dot g
-
-    // Ensure sigmaSq is positive to avoid division errors
-    if (sigmaSq <= 0) {
-        throw new IllegalArgumentException("Variance must be positive")
-    }
-
-    // Compute adjusted mean
-    val muAdj = mu dot g
-
-    // Compute standardized test statistic
-    val z = (q - muAdj) / math.sqrt(sigmaSq)
-
-    // Compute p-value using jdistlib Normal CDF
-    val pValue = 2.0 * (1.0 - Normal.cumulative(Math.abs(z), 0.0, 1.0, false, false))
-
-    pValue
-  }
-
   def addLogP(p1: Double, p2: Double): Double = {
     val absp1 = -abs(p1)
     val absp2 = -abs(p2)
@@ -228,59 +207,59 @@ object FuncCalcuZScores {
   }
 
   def getRootK1(
-    init: Double, 
-    mu: BDV[Double], 
-    g: BDV[Double], 
-    q: Double, 
-    tol: Double = pow(scala.Double.MinPositiveValue, 0.25), 
-    maxIter: Int = 1000
+      init: Double,
+      mu: BDV[Double],
+      g: BDV[Double],
+      q: Double,
+      tol: Double = pow(scala.Double.MinPositiveValue, 0.25),
+      maxIter: Int = 1000
   ): (Double, Int, Boolean) = {
 
     val gPos = sum(g(g >:> 0.0))  // Sum of positive values in g
     val gNeg = sum(g(g <:< 0.0))  // Sum of negative values in g
 
     if (q >= gPos || q <= gNeg) {
-      (Double.PositiveInfinity, 0, true)  // Return if q is out of bounds
+      (Double.PositiveInfinity, 0, true)
     } else {
       var t = init
-      var K1Eval = K1_adj(BDV(t), mu, g, q).apply(0)  // Compute initial K1
+      var K1Eval = K1_adj(BDV(t), mu, g, q).apply(0)
       var prevJump = Double.PositiveInfinity
       var iter = 1
       var converged = false
 
       while (iter <= maxIter) {
-        val K2Eval = K2(BDV(t), mu, g).apply(0)  // Compute K2 at t
+        val K2Eval = K2(BDV(t), mu, g).apply(0)
         val tNew = t - K1Eval / K2Eval
 
         if (tNew.isNaN) {
-          converged = false
-          return (Double.NaN, iter, converged)
+          return (Double.NaN, iter, false)
         }
 
         if (math.abs(tNew - t) < tol) {
-          converged = true
-          return (tNew, iter, converged)
+          return (tNew, iter, true)
         }
 
         val newK1 = K1_adj(BDV(tNew), mu, g, q).apply(0)
 
         if (math.signum(K1Eval) != math.signum(newK1)) {
           if (math.abs(tNew - t) > prevJump - tol) {
-            val tAdjusted = t + math.signum(newK1 - K1Eval) * prevJump / 2
-            t = tAdjusted
+            t = t + math.signum(newK1 - K1Eval) * prevJump / 2
             prevJump /= 2
+            K1Eval = K1_adj(BDV(t), mu, g, q).apply(0) // Recalculate after updating t
           } else {
             prevJump = math.abs(tNew - t)
+            t = tNew
+            K1Eval = newK1
           }
         } else {
           t = tNew
+          K1Eval = newK1
         }
 
-        K1Eval = newK1
         iter += 1
       }
 
-      (t, iter, converged)
+      (t, iter, false) // did not converge
     }
   }
 
@@ -313,8 +292,6 @@ object FuncCalcuZScores {
     var p1: Option[Double] = None
     var p2: Option[Double] = None
 
-    //var nodes: BDV[Double] = nodesInit
-
     var nodes: BDV[Double] = BDV()  // Empty init (won't be used unless output == "metaspline")
 
     if (output == "metaspline") {
@@ -328,17 +305,7 @@ object FuncCalcuZScores {
       }
 
       val splfun = Get_Saddle_Spline(mu, g, nodes)
-      // Store splfun as a var if you need it later
     }
-
-    // Handle "metaspline" output logic
-    //if (output == "metaspline") {
-    //  nodes = nodesFixed match {
-    //    case Some(fixedNodes) => BDV(fixedNodes.toArray.sorted :+ 0.0)
-    //    case None => val (newNodes, _) = getNodes(nodesInit.toDenseVector, mu, g)
-    //    newNodes
-    //  }
-    //}
 
     val score = q - m1
     val qinv = -Math.signum(q - m1) * Math.abs(q - m1) + m1
@@ -363,15 +330,6 @@ object FuncCalcuZScores {
 
       case _ => throw new IllegalArgumentException("Invalid type for Cutoff. Expected Double or \"BE\".")
     }
-
-    //if (Cutoff == "BE") {
-    //  val rho = mu.toScalaVector.zip(g.toScalaVector).map { case (m, gi) => Math.pow(Math.abs(gi.toDouble), 3) * m * (1 - m) * (Math.pow(m.toDouble, 2) + Math.pow(1 - m.toDouble, 2))}.sum
-    //  val B = 0.56 * rho * Math.pow(var1, -1.5)
-    //  val p = B + alpha / 2
-    //  cutoffValue = if (p >= 0.496) 0.01 else Normal.quantile(p, 0, 1, false, logP)
-    //} else if (Cutoff < 0.1) {
-    //  cutoffValue = 0.1
-    //}
 
     // Handle "metaspline" output logic
     if (output == "metaspline") {
@@ -427,7 +385,7 @@ object FuncCalcuZScores {
   }
 
   /*
-  Main function
+  Main functions
   */
 
   /**
@@ -487,8 +445,8 @@ object FuncCalcuZScores {
         "M_s" -> ghg,
         "s0" -> s0
       )
+    }
   }
-}
 
   def getZ_marg_score_binary_SPA (
     G: BDM[Double],
@@ -500,29 +458,28 @@ object FuncCalcuZScores {
     val Y0 = log_reg_predict(X, Y)
 
     // Calculate XVX inverse
-    val sqrtY0 = sqrt(Y0 *:* (1.0 - Y0))
-    val XV = ((X1(::, *) * sqrtY0).t).t
-    val XVX = X1.t * XV
-    val XVX_inv = inv(XVX)
-
-    // Compute XXVX_inv and Gscale
+    val Y0_vec = Y0 *:* (1.0 - Y0) // element-wise multiplication
+    val XV = (X1(::, *) * Y0_vec).t
+    val XVX_inv = inv(X1.t * (X1(::, *) * Y0_vec))
     val XXVX_inv = X1 * XVX_inv
-    val Gscale = G - (XXVX_inv.t * (XV * G.t)).t
+    val XVG = XV * G
+    val Gscale = G - XXVX_inv * XVG
 
     // Compute score
     val score = Gscale.t * Y
 
     // Compute p-values (using a placeholder function)
     val pval_spa = BDV((0 until score.size).map { x =>
-      saddleProb(score(x), Y0, Gscale(::, x))
+      SaddleProb(score(x), Y0, Gscale(::, x), "BE", 5 * math.pow(10, -8), "P", None, None, false)("p.value").asInstanceOf[Double]
     }.toArray)
 
     // Compute Z-scores
-    val Zscores_spa = BDV(pval_spa.map(p => Normal.quantile(1.0 - p / 2.0, 0.0, 1.0, false, false)).toArray) *:* signum(score)
+    val Zscores_spa = BDV(pval_spa.map(p => Normal.quantile(p / 2.0, 0.0, 1.0, false, false)).toArray) *:* signum(score)
 
     // Compute GHG and M
+    val sqrtY0 = sqrt(Y0_vec)
     val Xtilde = ((X(::, *) * sqrtY0).t).t
-    val Hhalf = Xtilde * cholesky(inv(Xtilde.t * Xtilde)).t
+    val Hhalf = Xtilde * cholesky(inv(Xtilde.t * Xtilde))
     val Gtilde = ((G(::, *) * sqrtY0).t).t
     val GHhalf = Gtilde.t * Hhalf
     val GHG = (Gtilde.t * Gtilde) - (GHhalf * GHhalf.t)
