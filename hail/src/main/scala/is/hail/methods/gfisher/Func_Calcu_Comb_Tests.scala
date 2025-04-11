@@ -2,7 +2,7 @@ package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
 import net.sourceforge.jdistlib.{Normal, ChiSquare, Cauchy}
-import breeze.stats.distributions.Gaussian
+
 import breeze.stats.mean
 import breeze.numerics.{abs, tan}
 import scala.math.Pi
@@ -61,7 +61,7 @@ object FuncCalcuCombTests {
 
     if(calc_p) {
 
-      // why do this?
+      // why do this?!?!
       // assign proper df data types depending on the df input value
       val dfInt: Int = df match {
         case Some(d) if d.isValidInt => d.toInt
