@@ -77,7 +77,6 @@ from .statgen import (
 
 __all__ = [
     'trio_matrix',
-    'get_z_marg',
     'get_best_b_model',
     'estimate_b',
     'estimate_pi',
