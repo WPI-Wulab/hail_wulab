@@ -29,8 +29,9 @@ from hail.utils.java import Env
     pheno=expr_float64,
     logistic=bool,
     method=str,
+    use_t=bool,
 )
-def glow(key, b, pi, geno, covariates, pheno, logistic: bool, method: str):
+def glow(key, b, pi, geno, covariates, pheno, logistic: bool, method: str, use_t: bool = False) -> Table:
     # TODO check that fields are correct type and from the correct mt
 
     mt = matrix_table_source("gfisher", key)
@@ -67,6 +68,7 @@ def glow(key, b, pi, geno, covariates, pheno, logistic: bool, method: str):
         "phenoField": y_field_name,
         "logistic": logistic,
         "method": method,
+        "useT": use_t,
     }
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 

@@ -12,7 +12,7 @@ import is.hail.types.virtual.{MatrixType, TFloat64, TStruct, TableType, TArray, 
 import is.hail.utils._
 
 import is.hail.methods.gfisher.OptimalWeights.{getH_Binary, getH_Continuous}
-import is.hail.methods.gfisher.FuncCalcuZScores.{getZMargScoreBinary, getZMargScoreContinuous}
+import is.hail.methods.gfisher.FuncCalcuZScores.{getZMargScoreBinary, getZMargScoreContinuous, getZMargScoreContinuousT}
 import org.apache.spark.sql.Row
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
@@ -42,6 +42,7 @@ case class GLOW(
   phenoField: String,
   logistic: Boolean,
   method: String,
+  useT: Boolean,
 ) extends MatrixToTableFunction {
 
   // define the return type of the function
@@ -81,6 +82,28 @@ case class GLOW(
     val groupedRDD = GFisherDataPrep.prepGlowRDD(mv, keyField, bField, piField, genoField, completeColIdx)
 
     def linearGlow() = {
+
+      if (useT) {
+        val XBC = HailContext.backend.broadcast(cov)
+        val yBC = HailContext.backend.broadcast(y)
+
+        groupedRDD.map{case(key, vals) =>
+          val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
+          val n = valArr.length
+          val (b: BDV[Double], pi: BDV[Double], geno: BDM[Double]) = GFisherArrayToVectors.glow(valArr)
+
+          val zstats = getZMargScoreContinuousT(geno, XBC.value, yBC.value)
+          val result = method match {
+            case "BURDEN" => GLOW_Burden.GLOW_Burden(zstats, b, pi)
+            case "SKAT" => GLOW_SKAT.GLOW_SKAT(zstats, b, pi)
+            case "OMNI" => GLOW_Omni.GLOW_Omni(zstats, b, pi)
+            case "FISHER" => GLOW_Fisher.GLOW_Fisher(zstats, b, pi)
+            case _ => fatal(s"Unknown method: $method")
+          }
+
+          Row(key, n, result("STAT").toArray.toFastSeq, result("PVAL").toArray.toFastSeq)
+        }
+      }
       val (hH, s0, resids) = getH_Continuous(cov, y)
       val HhalfBC = HailContext.backend.broadcast(hH)
       val s0BC = HailContext.backend.broadcast(s0)
@@ -95,7 +118,7 @@ case class GLOW(
         val result = method match {
           case "BURDEN" => GLOW_Burden.GLOW_Burden(zstats, b, pi)
           case "SKAT" => GLOW_SKAT.GLOW_SKAT(zstats, b, pi)
-          // case "OMNI" => GLOW_Omni(zstats, b, pi)
+          case "OMNI" => GLOW_Omni.GLOW_Omni(zstats, b, pi)
           case "FISHER" => GLOW_Fisher.GLOW_Fisher(zstats, b, pi)
           case _ => fatal(s"Unknown method: $method")
         }
@@ -118,7 +141,7 @@ case class GLOW(
         val result = method match {
           case "BURDEN" => GLOW_Burden.GLOW_Burden(zstats, b, pi)
           case "SKAT" => GLOW_SKAT.GLOW_SKAT(zstats, b, pi)
-          // case "OMNI" => GLOW_Omni(zstats, b, pi)
+          case "OMNI" => GLOW_Omni.GLOW_Omni(zstats, b, pi)
           case "FISHER" => GLOW_Fisher.GLOW_Fisher(zstats, b, pi)
           case _ => fatal(s"Unknown method: $method")
         }

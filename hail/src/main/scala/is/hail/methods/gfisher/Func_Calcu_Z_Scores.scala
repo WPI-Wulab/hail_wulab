@@ -58,7 +58,7 @@ object FuncCalcuZScores {
       val temp = (1.0 - mu) + (mu * exp(g *:* t1))
       out(i) = sum(log(temp))
     }
-    
+
     out
   }
 
@@ -104,7 +104,7 @@ object FuncCalcuZScores {
   def splinefunH(nodes: BDV[Double], y1: BDV[Double], y2: BDV[Double]): (Double, Int) => Double = {
     val spline = CubicInterpolator(nodes, y1)  // Breeze cubic spline
     val h = 1e-5  // Small step size for finite differences
-    
+
     // Find the min and max nodes for extrapolation bounds
     val minNode = nodes.min
     val maxNode = nodes.max
@@ -131,10 +131,10 @@ object FuncCalcuZScores {
         // Use spline interpolation within the range
         deriv match {
           case 0 => spline(x)  // Function value
-          case 1 => 
+          case 1 =>
             // Approximate first derivative using finite differences
             (spline(x + h) - spline(x - h)) / (2 * h)
-          case 2 => 
+          case 2 =>
             // Approximate second derivative using finite differences
             (spline(x + h) - 2 * spline(x) + spline(x - h)) / (h * h)
           case _ => throw new IllegalArgumentException("Only supports deriv = 0, 1, or 2")
@@ -145,8 +145,8 @@ object FuncCalcuZScores {
   def getNodes(init: BDV[Double], mu: BDV[Double], g: BDV[Double]): (BDV[Double], Double) = {
     var nodes = BDV.vertcat(init, BDV(0.0)).toArray.distinct.sorted
     var rep = 0
-    val t = (Array.tabulate(25)(i => math.pow(2, i / 2.0 - 2)) ++ 
-            Array.tabulate(25)(i => -math.pow(2, i / 2.0 - 2)) ++ 
+    val t = (Array.tabulate(25)(i => math.pow(2, i / 2.0 - 2)) ++
+            Array.tabulate(25)(i => -math.pow(2, i / 2.0 - 2)) ++
             Array(0.0)).sorted
     val yt = K1_adj(BDV(t), mu, g, 0)
     val w = t.map(x => if (math.pow(x, 2) > 1) 1.0 / math.pow(math.abs(x), 1.0 / 3) else 1.0)
@@ -156,7 +156,7 @@ object FuncCalcuZScores {
     while (rep <= 1) {
       val y1 = K1_adj(BDV(nodes), mu, g, 0)
       val y2 = K2(BDV(nodes), mu, g)
-      
+
       val sfun = splinefunH(BDV(nodes.toArray), BDV(y1.toArray), BDV(y2.toArray))
       val pred = t.map(x => sfun(x, 0))
       val predVec = BDV(pred: _*)
@@ -347,14 +347,14 @@ object FuncCalcuZScores {
         p1 = try {
           Some(getSaddleProb(outUni1._1, mu, g, q, logP))
         } catch {
-          case e: Exception => 
+          case e: Exception =>
             if (logP) Some(pvalNoadj - Math.log(2))
             else Some(pvalNoadj / 2)
         }
         p2 = try {
           Some(getSaddleProb(outUni2._1, mu, g, qinv, logP))
         } catch {
-          case e: Exception => 
+          case e: Exception =>
             if (logP) Some(pvalNoadj - Math.log(2))
             else Some(pvalNoadj / 2)
         }
@@ -569,6 +569,29 @@ object FuncCalcuZScores {
       "M_s" -> GHG,
       // s0 = 1 for binary trait
       "s0" -> 1.0
+    )
+
+  }
+
+  def getZMargScoreContinuousT(
+    G: BDM[Double],
+    X: BDM[Double],
+    Y: BDV[Double],
+  ): Map[String, Any] = {
+
+    val (ghg, s0, resids) = getGHG_Continuous(G, X, Y)
+    // Compute residuals
+    val score = G.t * resids / s0
+
+    val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+    val Zscore: BDV[Double] = BDV((0 until G.cols).map { j => contZScore(G(::, j), XWithIntercept, Y) }.toArray)
+
+    return Map(
+      "Zscores" -> Zscore,
+      "scores" -> score,
+      "M_Z" -> cov2cor(ghg),
+      "M_s" -> ghg,
+      "s0" -> s0
     )
 
   }
