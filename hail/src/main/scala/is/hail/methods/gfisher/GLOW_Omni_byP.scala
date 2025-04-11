@@ -29,6 +29,6 @@ object GLOW_Omni_byP {
 
         val Bstar = B /:/ SE // Element-wise division
 
-        FuncCalcuCombTests.BSF_cctP_test(Pvalues.get, finalZscoresVec, M, Bstar, PI)
+        FuncCalcuCombTests.BSF_cctP_test(finalZscoresVec, M, Bstar, PI)
     }
 }

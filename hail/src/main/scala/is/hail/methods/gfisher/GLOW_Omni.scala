@@ -7,7 +7,6 @@ import breeze.numerics._
 
 object GLOW_Omni {
     def GLOW_Omni (
-        Pvalues: BDV[Double],
         Zout: Map[String, Any],
         B: BDV[Double],
         PI: BDV[Double],
@@ -19,6 +18,6 @@ object GLOW_Omni {
         val Bstar = (sqrt(diag(Zout("M_s").asInstanceOf[BDM[Double]])) * B.asInstanceOf[BDV[Double]]) / s0
         val Zscores = Zout("Zscores").asInstanceOf[BDV[Double]]
 
-        FuncCalcuCombTests.BSF_cctP_test(Pvalues, Zscores, M, Bstar, PI)
+        FuncCalcuCombTests.BSF_cctP_test(Zscores, M, Bstar, PI)
     }
 }

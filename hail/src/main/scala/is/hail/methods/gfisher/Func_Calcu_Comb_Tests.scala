@@ -63,24 +63,23 @@ object FuncCalcuCombTests {
 
       // why do this?!?!
       // assign proper df data types depending on the df input value
-      val dfInt: Int = df match {
-        case Some(d) if d.isValidInt => d.toInt
-        case Some(Double.PositiveInfinity) => Int.MaxValue
-        case _ => 0
+      val dfs: Double = df match {
+        case Some(d: Double) => d
+        case _ => 0.0
       }
       // separate the calculation for burden test (df = Inf) and GFisher test
-      if (dfInt == Int.MaxValue) {
+      if (dfs == Int.MaxValue) {
         // burden test
         val M_mat = M.getOrElse(BDM.zeros[Double](weights.length, weights.length))
         val S_sd = math.sqrt(weights.t * M_mat * weights)
         val normalDist = new Normal(0, S_sd)
         val p = 2 * normalDist.cumulative(-math.abs(S))
         Map("S" -> S, "p" -> p)
-      } else if (dfInt != 0) {
+      } else if (dfs != 0) {
         // GFisher statistics
         // set degrees of freedom to be a vector, not an integer
         val (numRows, numCols) = M.map(m => (m.rows, m.cols)).getOrElse((0, 0))
-        val degreesOfFreedom = BDV.fill(numRows)(dfInt.toDouble)// why fill with dfInt.toDouble and not use original df?
+        val degreesOfFreedom = BDV.fill(numRows)(dfs.toDouble)// why fill with dfs.toDouble and not use original df?
         // rescale the weights
         weights = weights/sum(weights.map(math.abs))
         // recalculate the S to be consistent with the new weights
@@ -247,7 +246,6 @@ object FuncCalcuCombTests {
   }
 
   def BSF_cctP_test (
-    Pvalues: BDV[Double],
     Zscores: BDV[Double],
     M: BDM[Double],
     Bstar: BDV[Double],
@@ -255,6 +253,8 @@ object FuncCalcuCombTests {
   ): Map[String, BDM[Double]] = {
     val bsf = BSF_test(Zscores, M, Bstar, PI)
 
+
+    val Pvalues = Zscores.map(z => Normal.cumulative(-Math.abs(z), 0.0, 1.0, false, true))
     val cct = cctTest(Pvalues)
     val cctStat = cct("cct").asInstanceOf[Double]
     val cctP = cct("pval_cct").asInstanceOf[Double]
@@ -290,6 +290,6 @@ object FuncCalcuCombTests {
     PI: BDV[Double]
   ): Map[String, BDM[Double]] = {
     val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
-    BSF_cctP_test(Pvalues, Zscores, M, Bstar, PI)
+    BSF_cctP_test(Zscores, M, Bstar, PI)
   }
 }
