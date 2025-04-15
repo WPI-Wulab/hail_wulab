@@ -4,7 +4,7 @@ import is.hail.GaussKronrod
 
 import breeze.linalg.{DenseVector => BDV, DenseMatrix => BDM, _}
 import breeze.numerics.{abs, sqrt}
-import breeze.stats.{stddev}
+import breeze.stats.{stddev, mean}
 import net.sourceforge.jdistlib.Normal
 
 import org.apache.commons.math3.util.CombinatoricsUtils.factorialDouble
@@ -177,12 +177,12 @@ object OptimalWeights {
     * @param Sigma covariance matrix of T_1,...,T_n.
     * @param r vector of E_1(T_i) - E_0(T_i), i=1,...,n.
     * @param forcePosW if true, negative weights are set to 0.
-    * @param normalize if true, weights are normalized to sum to 1.
+    * @param normalize if true, weights are normalized by dividing by mean
     */
   def getWts(Sigma: BDM[Double], r: BDV[Double], forcePosW: Boolean=true, normalize:Boolean = true): BDV[Double] = {
     val w = inv(Sigma) * r
     if (forcePosW) w(w <:< 0.0) := 0.0
-    if (normalize) w := w /:/ sum(w)
+    if (normalize) w := w /:/ mean(abs(w))
     return w
   }
 
