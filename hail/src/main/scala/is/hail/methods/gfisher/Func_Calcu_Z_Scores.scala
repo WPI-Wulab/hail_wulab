@@ -567,8 +567,7 @@ object FuncCalcuZScores {
       "scores" -> score,
       "M_Z" -> cov2cor(GHG),
       "M_s" -> GHG,
-      // s0 = 1 for binary trait
-      "s0" -> 1.0
+      "s0" -> s0
     )
 
   }
