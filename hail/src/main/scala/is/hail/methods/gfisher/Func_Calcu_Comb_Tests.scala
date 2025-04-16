@@ -27,9 +27,9 @@ object FuncCalcuCombTests {
   // Combines g_GFisher_two and g_GFisher_one, controlled by oneSided ("one" or "two")
   def g_GFisher(x: Double, df: Double, oneSided: Boolean = false): Double = {
     if (oneSided)  {
-      g_GFisher_two(x, df)
-    } else {
       g_GFisher_one(x, df)
+    } else {
+      g_GFisher_two(x, df)
     }
   }
 
