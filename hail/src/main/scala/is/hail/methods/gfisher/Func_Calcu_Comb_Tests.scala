@@ -68,7 +68,7 @@ object FuncCalcuCombTests {
         case _ => 0.0
       }
       // separate the calculation for burden test (df = Inf) and GFisher test
-      if (dfs == Int.MaxValue) {
+      if (dfs.isPosInfinity) {
         // burden test
         val M_mat = M.getOrElse(BDM.zeros[Double](weights.length, weights.length))
         val S_sd = math.sqrt(weights.t * M_mat * weights)
@@ -79,7 +79,7 @@ object FuncCalcuCombTests {
         // GFisher statistics
         // set degrees of freedom to be a vector, not an integer
         val (numRows, numCols) = M.map(m => (m.rows, m.cols)).getOrElse((0, 0))
-        val degreesOfFreedom = BDV.fill(numRows)(dfs.toDouble)// why fill with dfs.toDouble and not use original df?
+        val degreesOfFreedom = BDV.fill(numRows)(dfs)
         // rescale the weights
         weights = weights/sum(weights.map(math.abs))
         // recalculate the S to be consistent with the new weights
@@ -120,7 +120,7 @@ object FuncCalcuCombTests {
         calcu_SgZ_p(x => x, Zscores, W(i, ::).t, calcP, M, Some(dfValue), oneSided, isPosiWts)
       } else {
         // GFisher test with transformation function
-        val g = (x: BDV[Double]) => x.map(v => g_GFisher(v, dfValue.toInt, oneSided))
+        val g = (x: BDV[Double]) => x.map(v => g_GFisher(v, dfValue, oneSided))
         calcu_SgZ_p(g, Zscores, W(i, ::).t, calcP, M, Some(dfValue), oneSided, isPosiWts)
       }
 
