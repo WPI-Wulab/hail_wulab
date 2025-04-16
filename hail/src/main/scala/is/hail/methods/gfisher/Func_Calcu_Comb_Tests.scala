@@ -254,7 +254,7 @@ object FuncCalcuCombTests {
     val bsf = BSF_test(Zscores, M, Bstar, PI)
 
 
-    val Pvalues = Zscores.map(z => Normal.cumulative(-Math.abs(z), 0.0, 1.0, false, true))
+    val Pvalues = Zscores.map(z =>  2.0 * Normal.cumulative(-Math.abs(z), 0.0, 1.0, true, false))
     val cct = cctTest(Pvalues)
     val cctStat = cct("cct").asInstanceOf[Double]
     val cctP = cct("pval_cct").asInstanceOf[Double]
