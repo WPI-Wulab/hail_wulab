@@ -20,6 +20,7 @@ import breeze.optimize.{DiffFunction, minimize}
 import is.hail.stats.LogisticRegressionModel
 import net.sourceforge.jdistlib.{Normal, ChiSquare}
 import is.hail.methods.gfisher.OptimalWeights.{getGHG_Binary, getGHG_Binary2, getGHG_Continuous}
+import scala.util.control.Breaks._
 
 object FuncCalcuZScores {
 
@@ -101,109 +102,142 @@ object FuncCalcuZScores {
     }
   }
 
-  def splinefunH(nodes: BDV[Double], y1: BDV[Double], y2: BDV[Double]): (Double, Int) => Double = {
-    val spline = CubicInterpolator(nodes, y1)  // Breeze cubic spline
-    val h = 1e-5  // Small step size for finite differences
+  def splineH0(x0: BDV[Double], y0: BDV[Double], m: BDV[Double]): (Double, Int) => Double = {
+    val n = x0.length
+    val h = x0(1 to -1) - x0(0 until n - 1) // step sizes
 
-    // Find the min and max nodes for extrapolation bounds
-    val minNode = nodes.min
-    val maxNode = nodes.max
+    def findInterval(x: Double): Int = {
+      // Mimics findInterval(x, x0, all.inside = TRUE)
+      if (x <= x0(0)) 0
+      else if (x >= x0(n - 1)) n - 2
+      else (0 until n - 1).find(i => x0(i) <= x && x < x0(i + 1)).getOrElse(n - 2)
+    }
 
-    (x: Double, deriv: Int) =>
-      // Extrapolation outside the range of the nodes
-      if (x < minNode) {
-        // Linear extrapolation on the left side (using first two points)
+    (x: Double, deriv: Int) => {
+      val i = findInterval(x)
+      val hi = h(i)
+      val t = (x - x0(i)) / hi
+      val t1 = t - 1.0
+      val yL = y0(i)
+      val yR = y0(i + 1)
+      val mL = m(i)
+      val mR = m(i + 1)
+
+      if (x < x0(0)) {
         deriv match {
-          case 0 => y1(0) + (x - nodes(0)) * (y1(1) - y1(0)) / (nodes(1) - nodes(0)) // Function value
-          case 1 => (y1(1) - y1(0)) / (nodes(1) - nodes(0))  // First derivative
-          case 2 => 0.0  // Second derivative (zero for linear extrapolation)
-          case _ => throw new IllegalArgumentException("Only supports deriv = 0, 1, or 2")
+          case 0 => y0(0) + m(0) * (x - x0(0))
+          case 1 => m(0)
+          case 2 => 0.0
         }
-      } else if (x > maxNode) {
-        // Linear extrapolation on the right side (using last two points)
+      } else if (x > x0(n - 1)) {
         deriv match {
-          case 0 => y1(nodes.length - 2) + (x - nodes(nodes.length - 2)) * (y1(nodes.length - 1) - y1(nodes.length - 2)) / (nodes(nodes.length - 1) - nodes(nodes.length - 2)) // Function value
-          case 1 => (y1(nodes.length - 1) - y1(nodes.length - 2)) / (nodes(nodes.length - 1) - nodes(nodes.length - 2))  // First derivative
-          case 2 => 0.0  // Second derivative (zero for linear extrapolation)
-          case _ => throw new IllegalArgumentException("Only supports deriv = 0, 1, or 2")
+          case 0 => y0(n - 1) + m(n - 1) * (x - x0(n - 1))
+          case 1 => m(n - 1)
+          case 2 => 0.0
         }
       } else {
-        // Use spline interpolation within the range
         deriv match {
-          case 0 => spline(x)  // Function value
+          case 0 =>
+            yL * (1 - 3 * t * t + 2 * t * t * t) +
+              mL * hi * (t - 2 * t * t + t * t * t) +
+              yR * (3 * t * t - 2 * t * t * t) +
+              mR * hi * (-t * t + t * t * t)
+
           case 1 =>
-            // Approximate first derivative using finite differences
-            (spline(x + h) - spline(x - h)) / (2 * h)
+            val dyL = (-6 * t + 6 * t * t)
+            val dyM1 = (1 - 4 * t + 3 * t * t)
+            val dyR = (6 * t - 6 * t * t)
+            val dyM2 = (-2 * t + 3 * t * t)
+            (yL * dyL + mL * hi * dyM1 + yR * dyR + mR * hi * dyM2) / hi
+
           case 2 =>
-            // Approximate second derivative using finite differences
-            (spline(x + h) - 2 * spline(x) + spline(x - h)) / (h * h)
-          case _ => throw new IllegalArgumentException("Only supports deriv = 0, 1, or 2")
+            val d2yL = (-6 + 12 * t)
+            val d2yM1 = (-4 + 6 * t)
+            val d2yR = (6 - 12 * t)
+            val d2yM2 = (-2 + 6 * t)
+            (yL * d2yL + mL * hi * d2yM1 + yR * d2yR + mR * hi * d2yM2) / (hi * hi)
+
+          case _ => throw new IllegalArgumentException("deriv must be 0, 1, or 2")
         }
       }
+    }
+  }
+
+  def splineH(x0: BDV[Double], y0: BDV[Double], m: BDV[Double]): (Double, Int) => Double = {
+    val idx = argsort(x0)
+    val xSorted = x0(idx).toDenseVector
+    val ySorted = y0(idx).toDenseVector
+    val mSorted = m(idx).toDenseVector
+    splineH0(xSorted, ySorted, mSorted)
   }
 
   def getNodes(init: BDV[Double], mu: BDV[Double], g: BDV[Double]): (BDV[Double], Double) = {
-    var nodes = BDV.vertcat(init, BDV(0.0)).toArray.distinct.sorted
+    val nodesInit = BDV((init.toArray :+ 0.0).distinct.sorted)
+    var nodes = nodesInit
     var rep = 0
-    val t = (Array.tabulate(25)(i => math.pow(2, i / 2.0 - 2)) ++
-            Array.tabulate(25)(i => -math.pow(2, i / 2.0 - 2)) ++
-            Array(0.0)).sorted
-    val yt = K1_adj(BDV(t), mu, g, 0)
-    val w = t.map(x => if (math.pow(x, 2) > 1) 1.0 / math.pow(math.abs(x), 1.0 / 3) else 1.0)
-    var jump = 0.5
+    val positiveT = (-2.0 to 10.0 by 0.5).map(x => math.pow(2, x))
+    val negativeT = (-2.0 to 10.0 by 0.5).map(x => -math.pow(2, x))
+    val tArray = (positiveT ++ negativeT :+ 0.0).distinct.sorted.toArray
+    val t = BDV(tArray)
+    val yt = K1_adj(t, mu, g, 0)
+    val w = BDV(t.toArray.map(ti => if (ti * ti > 1) 1.0 / math.pow(math.abs(ti), 1.0 / 3.0) else 1.0))
+    val jump = 0.5
     var totres = Double.PositiveInfinity
+    var finalNodes = BDV[Double]()
+    var finalLoss = Double.PositiveInfinity
 
-    while (rep <= 1) {
-      val y1 = K1_adj(BDV(nodes), mu, g, 0)
-      val y2 = K2(BDV(nodes), mu, g)
+    breakable {
+      while(true) {
+        val y1 = K1_adj(nodes, mu, g, 0)
+        val y2 = K2(nodes, mu, g)
+        val sfun = splineH(nodes, y1, y2)
+        val pred = BDV(t.toArray.map(x => sfun(x, 0)))
+        val res = w * abs(pred - yt)
+        val loss = res.sum
 
-      val sfun = splinefunH(BDV(nodes.toArray), BDV(y1.toArray), BDV(y2.toArray))
-      val pred = t.map(x => sfun(x, 0))
-      val predVec = BDV(pred: _*)
-      val ytVec = BDV(yt.toArray)
-      val wVec = BDV(w.toArray)
+        val newNodesBuffer = ArrayBuffer[Double]()
 
-      val res = (wVec.toArray, predVec.toArray, ytVec.toArray).zipped.map {
-        (wi: Double, pi: Double, yi: Double) => wi * math.abs(pi - yi)
-      }
+        for (i <- 0 until nodes.length if nodes(i) != 0.0) {
+          val resArray = res.toArray
+          val leftIdx = (0 until t.length).filter(j => t(j) < nodes(i) && (i == 0 || t(j) > nodes(i - 1)))
+          val rightIdx = (0 until t.length).filter(j => t(j) > nodes(i) && (i == nodes.length - 1 || t(j) < nodes(i + 1)))
 
-      val newNodesBuffer = ArrayBuffer[Double]()
-      for (i <- nodes.indices if nodes(i) != 0) {
-        val int1 = t.zipWithIndex.filter { case (ti, _) => ti < nodes(i) && (i == 0 || ti > nodes(i - 1)) }.map(_._2)
-        val int2 = t.zipWithIndex.filter { case (ti, _) => ti > nodes(i) && (i == nodes.length - 1 || ti < nodes(i + 1)) }.map(_._2)
+          val (r1: Double, _) = if (leftIdx.nonEmpty) {
+            val maxIdx = leftIdx.maxBy(j => resArray(j))
+            (resArray(maxIdx), t(maxIdx))
+          } else (0.0, 0.0)
 
-        val (r1, t1) = if (int1.nonEmpty) {
-          val maxIdx = int1.maxBy(res)
-          (res(maxIdx), t(maxIdx))
-        } else (0.0, 0.0)
+          val (r2: Double, _) = if (rightIdx.nonEmpty) {
+            val maxIdx = rightIdx.maxBy(j => resArray(j))
+            (resArray(maxIdx), t(maxIdx))
+          } else (0.0, 0.0)
 
-        val (r2, t2) = if (int2.nonEmpty) {
-          val maxIdx = int2.maxBy(res)
-          (res(maxIdx), t(maxIdx))
-        } else (0.0, 0.0)
-
-        if (r1 == r2) {
-          newNodesBuffer += nodes(i)
-        } else if (r1 > r2) {
-          val jump1 = jump * (1 - max(0.1, r2 / r1)) * abs(nodes(i))
-          newNodesBuffer += nodes(i) - jump1
-        } else {
-          val jump1 = jump * (1 - max(0.1, r1 / r2)) * abs(nodes(i))
-          newNodesBuffer += nodes(i) + jump1
+          if (r1 == r2) {
+            newNodesBuffer += nodes(i)
+          } else if (r1 > r2) {
+            val jump1 = jump * (1 - math.max(0.1, r2 / r1)) * math.abs(nodes(i))
+            newNodesBuffer += nodes(i) - jump1
+          } else {
+            val jump1 = jump * (1 - math.max(0.1, r1 / r2)) * math.abs(nodes(i))
+            newNodesBuffer += nodes(i) + jump1
+          }
         }
+
+        if (rep > 100 || loss > totres) {
+          finalNodes = nodes
+          finalLoss = totres
+          break
+        }
+
+        rep += 1
+        totres = loss
+
+        newNodesBuffer += 0.0
+        nodes = BDV(newNodesBuffer.distinct.sorted.toArray)
       }
-
-      newNodesBuffer += 0.0
-      val newNodes = newNodesBuffer.distinct.sorted
-
-      if (res.sum > totres) return (BDV(nodes), totres)
-
-      rep += 1
-      totres = res.sum
-      nodes = newNodes.toArray
     }
 
-    (BDV(nodes), totres)
+    (finalNodes, finalLoss)
   }
 
   def getRootK1(
