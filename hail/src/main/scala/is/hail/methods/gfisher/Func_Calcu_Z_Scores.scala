@@ -12,12 +12,7 @@ package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
 import breeze.numerics._
-import breeze.stats._
-import breeze.interpolation._
-import breeze.linalg.support.CanSlice
 import scala.collection.mutable.ArrayBuffer
-import breeze.optimize.{DiffFunction, minimize}
-import is.hail.stats.LogisticRegressionModel
 import net.sourceforge.jdistlib.{Normal, ChiSquare}
 import is.hail.methods.gfisher.OptimalWeights.{getGHG_Binary, getGHG_Binary2, getGHG_Continuous}
 import scala.util.control.Breaks._
@@ -117,7 +112,6 @@ object FuncCalcuZScores {
       val i = findInterval(x)
       val hi = h(i)
       val t = (x - x0(i)) / hi
-      val t1 = t - 1.0
       val yL = y0(i)
       val yR = y0(i + 1)
       val mL = m(i)
@@ -193,7 +187,7 @@ object FuncCalcuZScores {
         val sfun = splineH(nodes, y1, y2)
         val pred = BDV(t.toArray.map(x => sfun(x, 0)))
         val res = w * abs(pred - yt)
-        val loss = res.sum
+        val loss = sum(res)
 
         val newNodesBuffer = ArrayBuffer[Double]()
 
@@ -259,7 +253,6 @@ object FuncCalcuZScores {
       var K1Eval = K1_adj(BDV(t), mu, g, q).apply(0)
       var prevJump = Double.PositiveInfinity
       var iter = 1
-      var converged = false
 
       while (iter <= maxIter) {
         val K2Eval = K2(BDV(t), mu, g).apply(0)
@@ -337,8 +330,6 @@ object FuncCalcuZScores {
         case Some(fixedNodes) => BDV(fixedNodes.toArray.sorted :+ 0.0)
         case None => getNodes(initNodes.toDenseVector, mu, g)._1
       }
-
-      val splfun = Get_Saddle_Spline(mu, g, nodes)
     }
 
     val score = q - m1
@@ -363,11 +354,6 @@ object FuncCalcuZScores {
       case d: Double => if (d < 0.1) 0.1 else d
 
       case _ => throw new IllegalArgumentException("Invalid type for Cutoff. Expected Double or \"BE\".")
-    }
-
-    // Handle "metaspline" output logic
-    if (output == "metaspline") {
-      val splfun = Get_Saddle_Spline(mu, g, nodes)
     }
 
     // p-value calculation based on cutoff and convergence
