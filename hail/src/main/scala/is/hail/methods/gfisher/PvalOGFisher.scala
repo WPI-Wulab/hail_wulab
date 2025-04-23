@@ -1,3 +1,12 @@
+/*
+This file contains the function for computing the oGFisher test based on a vector of p-values
+Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
+           calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
+Creators: Kylie Hoar
+Last update (latest update first):
+  KHoar 2025-04-23: Added docstrings and internal comments
+*/
+
 package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
@@ -5,6 +14,30 @@ import breeze.stats.distributions.{Gaussian, MultivariateGaussian, CauchyDistrib
 
 object PvalOGFisher {
 
+  /**
+    * Compute the oGFisher test based on a vector of p-values
+    *
+    * Adapted from the GFisher R package ("~/GFisher/GFisher_v2.R"), specifically the function pval.oGFisher
+    * 
+    * @param p          a vector of input p-values of the oGFisher test
+    * @param DF         matrix of degrees of freedom for inverse chi-square transformation for each p-value. Each row represents a GFisher test. It allows a matrix of one column, indicating the same degrees of freedom for all p-values's chi-square transformations.
+    * @param W          matrix of weights. Each row represents a GFisher test.
+    * @param M          correlation matrix of the input Zscores from which the input p-values were obtained.
+    * @param one_sided  "false" = two-sided, "true" = one-sided input p-values.
+    * @param method     "MR" = simulation-assisted moment ratio matching, 
+    *                   "HYB" = moment ratio matching by quadratic approximation, 
+    *                   "GB" = Brown's method with calculated variance.
+    * @param combine    "cct" = oGFisher using the Cauchy combination method, 
+    *                   "mvn" = oGFisher using multivariate normal distribution.
+    * @param nsim       number of simulation used in the "MR" method, default = 5e4
+    * @param seed       seed for random number generation, default = NULL
+    *
+    * @return           A Map object containing:
+    *                     - "stat": the statistic of the oGFisher test, i.e., the cct or the minp statistic 
+    *                     - "pval": Matrix of corresponding p-values.
+    *                     - "pval_indi": the individual p-values of the involved GFisher tests
+    *                     - "stat_indi": the involved GFisher statistics 
+    */
   def pvalOGFisher(
     p: BDV[Double],
     DF: BDM[Double],

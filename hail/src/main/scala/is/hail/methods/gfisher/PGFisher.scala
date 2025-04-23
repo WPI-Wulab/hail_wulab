@@ -2,10 +2,11 @@
 This file contains main and supportive functions for computing PGFisher p-values
 Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
+           Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Peter Howell and Kylie Hoar
 Last update (latest update first):
+  KHoar 2025-04-23: Re-formatted docstrings and added comments
   PHowell 2025-02-26: Allow double degrees of freedom
-  KHoar 2024-11-30: sample format for future edits
 */
 
 package is.hail.methods.gfisher
@@ -25,9 +26,10 @@ object PGFisher {
   /**
     * Function that properly formats the nsim and seed Option inputs for pGFisher
     *
-    * @param nsim Option[Int] = number of simulation used in the "MR" method for pGFisher, default = 5e4
-    * @param seed Option[Int] = seed for random number generation, default = None
-    * @return flipped array of formatted ('initialized') nsim and seed inputs
+    * @param nsim  Option[Int] = number of simulation used in the "MR" method for pGFisher, default = 5e4
+    * @param seed  Option[Int] = seed for random number generation, default = None
+    *
+    * @return      Flipped array of formatted ('initialized') nsim and seed inputs
     */
   def initializeParams(nsim: Option[Int], seed: Option[Int]): (Int, Option[Int]) = {
     val initializedNsim = nsim.getOrElse(50000)
@@ -41,8 +43,9 @@ object PGFisher {
   /**
     * Function to find the mean of a dense vector
     *
-    * @param v n dense vector with numeric values
-    * @return mean of the dense vector
+    * @param v  n dense vector with numeric values
+    *
+    * @return   mean of the dense vector
     */
   def mean[T: Numeric](v: BDV[T]): Double = {
     val num = implicitly[Numeric[T]]
@@ -52,8 +55,9 @@ object PGFisher {
   /**
     * Function to find the standard deviation of a dense vector
     *
-    * @param v n dense vector with numeric values
-    * @return standard deviation of the dense vector
+    * @param v  n dense vector with numeric values
+    *
+    * @return   standard deviation of the dense vector
     */
   def stdDev[T: Numeric](v: BDV[T]): Double = {
     val num = implicitly[Numeric[T]]
@@ -64,17 +68,18 @@ object PGFisher {
 
   /*
   Main functions
+  (adapted from the GLOW R package: "GLOW_R_package/GLOW/R/helpers_GFisher.R", specifically p.GFisher function)
   */
 
   /**
     * Get P-values using moment ratio matching by quadratic approximation
     *
-    * @param q GFisher test statistic
-    * @param df n-dimensional vector of degrees of freedom
-    * @param w n-dimensional vector of weights
-    * @param M n by n correlation matrix
-    * @return the p-value of the GFisher test
-    * @example insert example here!
+    * @param q   GFisher test statistic
+    * @param df  n-dimensional vector of degrees of freedom
+    * @param w   n-dimensional vector of weights
+    * @param M   n by n correlation matrix
+    *
+    * @return    the p-value of the GFisher test
     */
   def pGFisherHyb(
     q: Double,
@@ -98,15 +103,15 @@ object PGFisher {
   /**
     * Get P-values using moment ratio matching by quadratic approximation
     *
-    * @param q GFisher test statistic
-    * @param df n-dimensional vector of degrees of freedom
-    * @param w n-dimensional vector of weights
-    * @param M n by n correlation matrix
-    * @param oneSided true = one-sided input p-values, false = two-sided input p-values
-    * @param nsimOpt number of simulation used in the "MR" method for pGFisher, default = 5e4
-    * @param seedOpt seed for random number generation, default = None
-    * @return the p-value of the GFisher test
-    * @example insert example here!
+    * @param q         GFisher test statistic
+    * @param df        n-dimensional vector of degrees of freedom
+    * @param w         n-dimensional vector of weights
+    * @param M         n by n correlation matrix
+    * @param oneSided  true = one-sided input p-values, false = two-sided input p-values
+    * @param nsimOpt   number of simulation used in the "MR" method for pGFisher, default = 5e4
+    * @param seedOpt   seed for random number generation, default = None
+    *
+    * @return          p-value of the GFisher test
     */
   def pGFisherMR(
     q: Double,
@@ -166,11 +171,13 @@ object PGFisher {
   /**
     * Get P-values using brown's method with calculated variance
     *
-    * @param q GFisher test statistic
-    * @param df n-dimensional vector of degrees of freedom
-    * @param w n-dimensional vector of weights
-    * @param M n by n correlation matrix
-    * @param oneSided whether the p values are one sided
+    * @param q         GFisher test statistic
+    * @param df        n-dimensional vector of degrees of freedom
+    * @param w         n-dimensional vector of weights
+    * @param M         n by n correlation matrix
+    * @param oneSided  whether the p values are one sided
+    * 
+    * @return          p-value of the GFisher test
     */
   def pGFisherGB(
     q: Double,

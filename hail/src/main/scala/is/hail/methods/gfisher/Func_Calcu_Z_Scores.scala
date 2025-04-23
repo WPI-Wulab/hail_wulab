@@ -3,6 +3,7 @@ This file contains main and supportive functions for computing Z-scores from a m
 and a binary response
 Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
+           Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar and Peter Howell
 Last update (latest update first):
   KHoar 2025-04-23: Re-formatted docstrings

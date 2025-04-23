@@ -3,6 +3,7 @@ This file contains functions for computing the summation-based Z-score combinati
 scaled weights, and Z_i's are Z scores. The functions in this file are designed to be used for the combination tests in the context of genetic association studies, such as burden test, SKAT test, Fisher test, and GFisher test. Implemtation highly depends on the GFisher library/package. Further implementations for the similar task can be included into this file.
 Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
+           Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar
 Last update (latest update first):
   KHoar 2025-04-23: Added docstrings and internal comments
