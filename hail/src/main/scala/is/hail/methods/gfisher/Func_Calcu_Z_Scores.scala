@@ -46,6 +46,8 @@ object FuncCalcuZScores {
   /*
   Saddlepoint Approximation (SPA) Test Functions
   (an adaptation of the 'SPAtest' R package: https://cran.r-project.org/web/packages/SPAtest/SPAtest.pdf)
+  (splineH0 and splineH are an adaptation of some R functions in the splinefun package:
+  https://github.com/SurajGupta/r-source/blob/master/src/library/stats/R/splinefun.R)
   */
 
   /**
@@ -626,7 +628,7 @@ object FuncCalcuZScores {
    * @param G         A matrix of genotype (# of individuals x # of SNPs)
    * @param X         A matrix of covariates, default is 1
    * @param Y         A single column of response variable; it has to be 0/1 for binary trait
-   * @param trait_lm  Indicator of "binary" (logistic regression) or "continuous" (linear regression).
+   * @param binary    Indicator of "true" (binary, logistic regression) or "false" (continuous, linear regression).
    * @param use_lm_t  Whether to use the lm() function to get the t statistics as the Z-scores for continuous trait
    * 
    * @return Zscores  A vector of Z scores of the marginal score statistics for each SNP.
