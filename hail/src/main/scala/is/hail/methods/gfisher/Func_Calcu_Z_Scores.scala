@@ -26,9 +26,11 @@ object FuncCalcuZScores {
   /**
     * Calculate the Z score by the marginal t statistics for Y vs. each column of G and X
     *
-    * @param g Extracted column (BDV) of genotype matrix
-    * @param X Input feature matrix (rows: observations, cols: features) with first column of ones for intercept
-    * @param Y Target vector (binary labels: 0 or 1).
+    * @param g  Extracted column (BDV) of genotype matrix
+    * @param X  Input feature matrix (rows: observations, cols: features) with first column of ones for intercept
+    * @param Y  Target vector (binary labels: 0 or 1).
+    *
+    * @return   Continuous (LinReg) marginal t statistics
     */
   def contZScore (g: BDV[Double], X: BDM[Double], Y: BDV[Double]): Double = {
     // Combine column of g with X
@@ -51,6 +53,7 @@ object FuncCalcuZScores {
     *
     * @param p1 First log-probability
     * @param p2 Second log-probability
+    *
     * @return   Logarithm of the sum of probabilities
     */
   def addLogP(p1: Double, p2: Double): Double = {
@@ -71,6 +74,7 @@ object FuncCalcuZScores {
     * @param t   Vector of scalar evaluation points
     * @param mu  Vector of expected values (e.g., probabilities)
     * @param g   Vector of coefficients (e.g., effect sizes)
+    *
     * @return    Vector of CGF values evaluated at each t_i
     */
   def Korg(t: BDV[Double], mu: BDV[Double], g: BDV[Double]): BDV[Double] = {
@@ -92,6 +96,7 @@ object FuncCalcuZScores {
     * @param mu Vector of means for each component
     * @param g  Vector of effect sizes or coefficients for each component
     * @param q  Scalar constant (typically the observed test statistic or weight)
+    *
     * @return   Vector where each element corresponds to the adjusted K1 value for the corresponding t(i)
     */
   def K1_adj(t: BDV[Double], mu: BDV[Double], g: BDV[Double], q: Double): BDV[Double] = {
@@ -116,6 +121,7 @@ object FuncCalcuZScores {
     * @param t  Vector of evaluation points (same length as out)
     * @param mu Vector of Bernoulli means (probabilities)
     * @param g  Vector of effect sizes or weights
+    *
     * @return   Vector where each element is K2(t_i)
     */
   def K2(t: BDV[Double], mu: BDV[Double], g: BDV[Double]): BDV[Double] = {
@@ -146,6 +152,7 @@ object FuncCalcuZScores {
     * @param mu    Vector of Bernoulli means (probabilities)
     * @param g     Vector of effect sizes or weights
     * @param nodes Evaluation points for t (spline knots)
+    *
     * @return      A matrix with three columns: [t, K1_adj(t) - mean, K2(t)] with any rows 
     *              where t == 0 removed (to avoid singularity or undefined values)
     */
@@ -177,6 +184,7 @@ object FuncCalcuZScores {
     * @param x0  Vector of x-coordinates (nodes/knots), must be sorted ascending
     * @param y0  Vector of function values at x0
     * @param m   Vector of derivatives (slopes) at x0, typically estimated from K1/K2
+    *
     * @return    Function that takes an input x and a derivative order (0, 1, or 2) and returns the spline value
     */
   def splineH0(x0: BDV[Double], y0: BDV[Double], m: BDV[Double]): (Double, Int) => Double = {
@@ -257,6 +265,7 @@ object FuncCalcuZScores {
     * @param x0  Vector of x-values (not necessarily sorted)
     * @param y0  Function values at each x0
     * @param m   Derivatives (slopes) at each x0
+    *
     * @return    A spline function, (Double, Int) => Double, for evaluating spline or its derivatives
     */
   def splineH(x0: BDV[Double], y0: BDV[Double], m: BDV[Double]): (Double, Int) => Double = {
@@ -278,6 +287,7 @@ object FuncCalcuZScores {
     * @param init Initial guess for node locations where the spline will interpolate the function
     * @param mu   Mean vector used in computing the cumulant functions (K1_adj and K2)
     * @param g    Gradient vector used with mu in the cumulant function computations
+    *
     * @return     spline interpolation nodes
     */
   def getNodes(init: BDV[Double], mu: BDV[Double], g: BDV[Double]): (BDV[Double], Double) = {
@@ -373,6 +383,7 @@ object FuncCalcuZScores {
     * @param tol      (optional, default = pow(scala.Double.MinPositiveValue, 0.25)), Tolerance for convergence; the root
                       is considered found if the step size is smaller than this
     * @param maxIter  (optional, default = 1000), Maximum number of iterations to perform before declaring non-convergence
+    *
     * @return         (Double, Int, Boolean) Double: estimated root t (may be pos infinity if q is out of bounds or Null if
     *                                                computation encounters instability)
     *                                        Int: number of iterations performed before convergence or termination
@@ -449,6 +460,7 @@ object FuncCalcuZScores {
     *              contributions)
     * @param q     Scalar summarizing the observed test statistic
     * @param logP  If true, return the logarithm of the p-value; otherwise, return the raw p-value
+    *
     * @return      Saddelpoint approximation of a p-value
     */
   def getSaddleProb(zeta: Double, mu: BDV[Double], g: BDV[Double], q: Double, logP: Boolean = false): Double = {
@@ -489,6 +501,7 @@ object FuncCalcuZScores {
     * @param nodesFixed  Optional fixed spline nodes; used only if output == "metaspline"
     * @param nodesInit   Initial spline node guesses; required if output == "metaspline" and nodesFixed is not provided
     * @param logP        If true, returns log-transformed p-values
+    * 
     * @return            A map containing:
     *                       - `"p.value"`: The computed p-value.
     *                       - `"p.value.NA"`: The unadjusted p-value (before any saddlepoint adjustments).
@@ -605,16 +618,20 @@ object FuncCalcuZScores {
 
   /**
    * Get the standardized marginal score statistics
-   * @param G A matrix of genotype (# of individuals x # of SNPs)
-   * @param X A matrix of covariates, default is 1
-   * @param Y A single column of response variable; it has to be 0/1 for binary trait
-   * @param trait_lm indicator of "binary" (logistic regression) or "continuous" (linear regression).
-   * @param use_lm_t whether to use the lm() function to get the t statistics as the Z-scores for continuous trait
-   * @return Zscores A vector of Z scores of the marginal score statistics for each SNP.
-   * @return scores A vector of the marginal score statistics for each SNP
-   * @return M_Z the correlation matrix of Z scores when effects are fixed (including H0) given X and G fixed.
-   * @return M_s the covariance matrix of the score statistics when effects are fixed (including H0) given X and G fixed.
-   * @return s0 the estimated dispersion parameter. Binary trait: s0=1. Continuous trait: residual SD under the null model.
+   * 
+   * Adapted from the GLOW R package ("GLOW_R_package/GLOW/R/getZ_marg_score.R")
+   * 
+   * @param G         A matrix of genotype (# of individuals x # of SNPs)
+   * @param X         A matrix of covariates, default is 1
+   * @param Y         A single column of response variable; it has to be 0/1 for binary trait
+   * @param trait_lm  Indicator of "binary" (logistic regression) or "continuous" (linear regression).
+   * @param use_lm_t  Whether to use the lm() function to get the t statistics as the Z-scores for continuous trait
+   * 
+   * @return Zscores  A vector of Z scores of the marginal score statistics for each SNP.
+   * @return scores   A vector of the marginal score statistics for each SNP
+   * @return M_Z      The correlation matrix of Z scores when effects are fixed (including H0) given X and G fixed.
+   * @return M_s      The covariance matrix of the score statistics when effects are fixed (including H0) given X and G fixed.
+   * @return s0       The estimated dispersion parameter. Binary trait: s0=1. Continuous trait: residual SD under the null model.
    */
   def getZMargScore(
     G: BDM[Double],
@@ -667,14 +684,17 @@ object FuncCalcuZScores {
     * Performs marginal score testing using Saddlepoint Approximation (SPA) for binary outcomes.
     * This is often used in genome-wide association studies (GWAS) with a logistic regression null model.
     *
-    * @param G Genotype matrix of shape (n_samples, n_variants)
-    * @param X Covariate matrix of shape (n_samples, n_covariates)
-    * @param Y Binary outcome vector (0 or 1), of length n_samples
-    * @return A Map containing:
-    *         - "Zscores": BDV[Double] of SPA Z-scores for each variant
-    *         - "M": BDM[Double] of correlation matrix for variants (after projection)
-    *         - "GHG": BDM[Double] of G'G adjusted for covariates
-    *         - "s0": Double, dispersion parameter (currently fixed at 1.0)
+    * Adapted from the GLOW R package ("GLOW_R_package/GLOW/R/getZ_marg_score_binary_SPA.R")
+    *
+    * @param G  Genotype matrix of shape (n_samples, n_variants)
+    * @param X  Covariate matrix of shape (n_samples, n_covariates)
+    * @param Y  Binary outcome vector (0 or 1), of length n_samples
+    * 
+    * @return   A Map containing:
+    *             - "Zscores": BDV[Double] of SPA Z-scores for each variant
+    *             - "M": BDM[Double] of correlation matrix for variants (after projection)
+    *             - "GHG": BDM[Double] of G'G adjusted for covariates
+    *             - "s0": Double, dispersion parameter (currently fixed at 1.0)
     */
   def getZ_marg_score_binary_SPA (
     G: BDM[Double],

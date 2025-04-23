@@ -1,3 +1,13 @@
+/*
+This file contains functions for computing the summation-based Z-score combination statistics and related p-values. The combination statistics are defined as S = sum_i^n w_i*g(Z_i), where g() is a function for transforming Z scores, w_i's are 
+scaled weights, and Z_i's are Z scores. The functions in this file are designed to be used for the combination tests in the context of genetic association studies, such as burden test, SKAT test, Fisher test, and GFisher test. Implemtation highly depends on the GFisher library/package. Further implementations for the similar task can be included into this file.
+Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
+           calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
+Creators: Kylie Hoar
+Last update (latest update first):
+  KHoar 2025-04-21: Added comments to SPA-related functions
+*/
+
 package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
@@ -9,22 +19,55 @@ import scala.math.Pi
 
 object FuncCalcuCombTests {
 
-  // Transformation function g(z) for Z-scores with two-sided input p-values
+  /*
+  A Burden-SKAT-Fisher (BSF) omnibus test that combines optimal weighting and uses the Cauchy Combination Test (CCT) to combine p-values
+  (adapted from the GLOW R package: "GLOW_R_package/GLOW/R/helpers_GLOWtests.R")
+  */
+
+  /**
+    * Transformation function g(z) for Z-scores with two-sided input p-values
+    *
+    * @param x  The Z-score to be transformed. Assumed to follow a standard normal distribution
+    * @param df The degrees of freedom for the resulting Chi-square distribution
+    *
+    * @return   The Chi-square quantile corresponding to the log-transformed two-sided p-value
+    */
   def g_GFisher_two(x: Double, df: Double): Double = {
     val pValueLog = math.log(2) + Normal.cumulative(math.abs(x), 0.0, 1.0, false, true)
     ChiSquare.quantile(pValueLog, df, false, true)
   }
 
-  // Transformation function g(x) for Z-scores with one-sided input p-values
+  /**
+    * Transformation function g(x) for Z-scores with one-sided input p-values
+    * 
+    * @param x  The Z-score to be transformed. Assumed to follow a standard normal distribution.
+    * @param df The degrees of freedom for the resulting Chi-square distribution.
+    *
+    * @return   The Chi-square quantile corresponding to the log-transformed one-sided p-value.
+    */
   def g_GFisher_one(x: Double, df: Double): Double = {
     val pValueLog = Normal.cumulative(x, 0.0, 1.0, false, true)
     ChiSquare.quantile(pValueLog, df, false, true)
   }
 
-    // Transformation function g(x) for burden/Laptik test (identity function)
-    def g_Burden(x: Double): Double = x
+  /**
+    * Identity transformation function g(x) for the Burden or Laptik test.
+    *
+    * @param x The input value (typically a test statistic or summary score).
+    *
+    * @return  The same input value, unchanged.
+    */
+  def g_Burden(x: Double): Double = x
 
-  // Combines g_GFisher_two and g_GFisher_one, controlled by oneSided ("one" or "two")
+  /**
+    * Transformation function g(x) for GFisher method, selecting one-sided or two-sided logic.
+    *
+    * @param x  Z-score to be transformed.
+    * @param df Degrees of freedom used in the chi-square transformation.
+    * @param    oneSided If true, uses the one-sided transformation; otherwise uses the two-sided.
+    *
+    * @return   Transformed statistic on the chi-square scale.
+    */
   def g_GFisher(x: Double, df: Double, oneSided: Boolean = false): Double = {
     if (oneSided)  {
       g_GFisher_one(x, df)
@@ -33,6 +76,41 @@ object FuncCalcuCombTests {
     }
   }
 
+  /**
+    * Compute the combination statistic for S = sum_i^n w_i*g(Z_i), given an arbitrary function g(), the weights w_i's, the Z 
+    * scores and their correlation matrix. The p-value can be calculated for burden test and GFisher test.
+    *
+    * @param g            Function for tranforming Z scores
+    * @param Zscores      Vector of Z scores
+    * @param wts          Vector of weights, allowing negative values being used in calculating S when is.posi.wts=FALSE
+    * @param calc_p       Logical value indicating whether to calculate p-value. 
+    *                     Currently, p-value calculation is available for 
+    *                      - burden test: when g = function(x)x or df=Inf. Allow for negative weights.                   
+    *                      - GFisher test: output one-sided p-value, which requires non-negative weights.
+    *                     One can use the g_GFisher, g_GFisher_one, or g_GFisher_two function, or set proper df argument.
+    * @param M            Correlation matrix of the Z scores. Default is NULL.
+    * @param df           Constant degrees of freedom for the GFisher statistic. Default is NULL. 
+    *                     Require to be consistent with the function g. If the function g contains a df argument, that value 
+    *                     will be used. df=Inf indicates the burden test.
+    * @param p.type       Type of input p-values of GFisher, "one" or "two" sided. Default is "two".
+    *                     It is only used when the function g is for GFisher test.
+    *                     If the function g contains p.type as an argument, that value will be used.
+    * @param is.posi.wts  Logical value indicating whether negative weights are casted to be 0. Default is TRUE.
+    *                     calc_p=TRUE for GFisher test will force the weights to be non-negative and then normalized.
+    * @param method       For p.GFisher: "MR" = simulation-assisted moment ratio matching, 
+    *                                    "HYB" = moment ratio matching by quadratic approximation, 
+    *                                    "GB" = Brown's method with calculated variance. See details in the reference.
+    * @param nsim         For p.GFisher: Number of simulation used in the "MR" method, default = 5e4.
+    * @param seed         For p.GFisher: Seed for random number generation, default = NULL.
+    *
+    * NOTE: When calculating the statistics only (i.e., calcu_p=FALSE), the g function is pretty arbitrary, and the weights can 
+    * be negative. This can be used for empirical studies (e.g., empirical type I error or power). The weights are always scaled 
+    * to be wts/sum(abs(wts)).
+    *
+    * @return S           The combination statistic
+    * @return p           The p-value. For burden test, it's two-sided in consistence with genetical studies.
+    *                     For GFisher, it's one-sided calculated by p.GFisher's default "HYB" method.
+    */
   def calcu_SgZ_p (
     g: BDV[Double] => BDV[Double],  // Function g
     Zscores: BDV[Double],
@@ -96,7 +174,30 @@ object FuncCalcuCombTests {
     }
   }
 
-  // Multi SgZ Test with integrated burden test
+  /**
+    * Performs the Multi SgZ test with optional burden test integration.
+    *
+    * Computes statistics and p-values for a series of tests using either the
+    * burden test (when degrees of freedom are infinite) or the GFisher method (for finite degrees of freedom).
+    * Each row in `DF` corresponds to a separate test, with associated weights in `W`.
+    *
+    * The transformation function `g(x)` is selected based on the degrees of freedom:
+    *   - If df = Inf: the identity function is used (Burden test).
+    *   - If df < Inf: a chi-square transformation of Z-scores is applied (GFisher test).
+    *
+    * @param Zscores    Vector of Z-scores for the variants being tested.
+    * @param DF         Matrix where each row contains the degrees of freedom for the corresponding test.
+    * @param W          Matrix of weights corresponding to each test (rows) and each Z-score (columns).
+    * @param M          Optional covariance/correlation matrix (used for adjusting the score).
+    * @param oneSided   Whether to use one-sided transformation for p-values (default: false = two-sided).
+    * @param calcP      Whether to compute p-values in addition to test statistics (default: true).
+    * @param isPosiWts  Whether to enforce positivity on weights (default: true).
+    * @param wNames     Optional names of the weight sets (not used in computation, useful for annotation).
+    *
+    * @return           A Map object containing:
+    *                     - "STAT": Column vector of computed test statistics.
+    *                     - "PVAL": Column vector of p-values (if `calcP` is true).
+    */
   def multi_SgZ_test(
     Zscores: BDV[Double],
     DF: BDM[Double],
@@ -131,6 +232,20 @@ object FuncCalcuCombTests {
     Map("STAT" -> STAT, "PVAL" -> PVAL)
   }
 
+  /**
+    * Performs the Cauchy Combination Test (CCT) to combine a vector of p-values into a single p-value.
+    *
+    * The CCT method is particularly robust for combining dependent p-values and handles extremely small or large
+    * p-values by applying appropriate transformations. When small p-values are present (below `thrSmallP`), it uses 
+    * a special approximation to avoid numerical instability.
+    *
+    * @param pvals      Vector of p-values to be combined.
+    * @param thrLargeP  Threshold for clipping large p-values (default: 0.9). Any p-value above this is capped.
+    * @param thrSmallP  Threshold below which p-values are considered extremely small (default: 1e-15).
+    * @return           A Map object containing:
+    *                     - "cct": The CCT statistic (combined transformed value).
+    *                     - "pval_cct": The final p-value computed from the CCT statistic using the Cauchy distribution.
+    */
   def cctTest(pvals: BDV[Double], thrLargeP: Double = 0.9, thrSmallP: Double = 1e-15): Map[String, Any] = {
     // Replace large p-values
     val clippedPvals = pvals.map(p => if (p > thrLargeP) thrLargeP else p)
@@ -158,6 +273,23 @@ object FuncCalcuCombTests {
     Map("cct" -> cct, "pval_cct" -> pvalCCT)
   }
 
+  /**
+    * Performs the Omni SgZ Test, a unified framework that combines multiple SgZ statistics
+    * (including GFisher and Burden-type tests) with an overall Cauchy Combination Test (CCT).
+    *
+    * @param            Zscores Vector of Z-scores corresponding to genetic variants or features.
+    * @param DF         Matrix specifying degrees of freedom per test. Use `Double.PositiveInfinity` for burden tests.
+    * @param W          Weight matrix; each row defines a weight set used in testing.
+    * @param M          Covariance matrix of decorrelated scores (used in SgZ test).
+    * @param oneSided   If `true`, uses one-sided transformations; otherwise, uses two-sided.
+    * @param calcuP     Whether to calculate p-values in addition to test statistics.
+    * @param isPosiWts  If `true`, assumes weights are non-negative (used in weighted statistics).
+    * @return           A Map object containing:
+    *                     - "STAT": Matrix of test statistics (one per weight set plus CCT).
+    *                     - "PVAL": Matrix of corresponding p-values.
+    *                     - "cct": The CCT statistic summarizing all tests.
+    *                     - "pval_cct": P-value from the CCT statistic.
+    */
   def omni_SgZ_test(
     Zscores: BDV[Double],
     DF: BDM[Double],
@@ -188,6 +320,24 @@ object FuncCalcuCombTests {
     )
   }
 
+  /**
+    * Performs the Burden-SKAT-Fisher (BSF) omnibus test by combining optimal weighting schemes
+    * across three distinct types of tests: Burden (linear), SKAT (quadratic), and Fisher (p-value combination).
+    *
+    * For each test type, optimal weights are computed using the `optimalWeightsM` function and combined
+    * with equal weights to ensure robustness. Test statistics are then calculated using the `omni_SgZ_test`,
+    * which aggregates across the three test families using the Cauchy Combination Test (CCT).
+    *
+    * @param Zscores           Vector of Z-scores corresponding to genetic variants or features.
+    * @param M                 Covariance matrix of decorrelated scores (used to compute test statistics).
+    * @param Bstar             Vector of score magnitudes or test statistics used in weight optimization.
+    * @param PI                Vector of posterior inclusion probabilities or prior weights for the variants.
+    * @param additionalParams  Additional parameters (not used here, but available for interface flexibility).
+    *
+    * @return                  A Map object containing:
+    *                           - "STAT": Matrix of computed test statistics for all weight sets.
+    *                           - "PVAL": Matrix of corresponding p-values.
+    */
   def BSF_test(
     Zscores: BDV[Double],
     M: BDM[Double],
@@ -234,6 +384,22 @@ object FuncCalcuCombTests {
     Map("STAT" -> omniStat, "PVAL" -> omniPval)
   }
 
+  /**
+    * Wrapper for the Burden-SKAT-Fisher (BSF) omnibus test that operates on p-values and Z-score signs
+    * instead of raw Z-scores. Converts two-sided p-values to signed Z-scores using the inverse normal quantile function.
+    *
+    * This allows integration with tools or pipelines that provide p-values but not Z-scores directly.
+    *
+    * @param Pvalues  Vector of two-sided p-values corresponding to genetic variants or features.
+    * @param Zsigns   Vector of Z-score signs (+1 or -1) to recover signed test statistics.
+    * @param M        Covariance matrix of decorrelated scores (used to compute test statistics).
+    * @param Bstar    Vector of score magnitudes or test statistics used in weight optimization.
+    * @param PI       Vector of posterior inclusion probabilities or prior weights for the variants.
+    *
+    * @return         A Map object containing:
+    *                   - "STAT": Matrix of computed test statistics for all weight sets.
+    *                   - "PVAL": Matrix of corresponding p-values.
+    */
   def BSF_test_byP (
     Pvalues: BDV[Double],
     Zsigns: BDV[Double],
@@ -245,43 +411,80 @@ object FuncCalcuCombTests {
     BSF_test(Zscores, M, Bstar, PI)
   }
 
+  /**
+    * Performs the Burden-SKAT-Fisher (BSF) omnibus test and augments it with two additional 
+    * Cauchy Combination Test (CCT) p-values to enhance power and robustness.
+    *
+    * This test includes:
+    *   1. The standard BSF test statistics and p-values.
+    *   2. A global CCT p-value computed from the input Z-scores.
+    *   3. A second-stage CCT p-value combining the BSF p-values and the global CCT p-value.
+    *
+    * @param Zscores  Vector of signed Z-scores corresponding to genetic variants or features.
+    * @param M        Covariance matrix of decorrelated scores (used for test statistic calculation).
+    * @param Bstar    Vector of score magnitudes used in weight optimization.
+    * @param PI       Vector of posterior inclusion probabilities or prior weights for the variants.
+    *
+    * @return         A Map object containing:
+    *                   - "STAT": Matrix of test statistics including BSF statistics, global CCT stat,
+    *                             and second-stage BSF-CCT combination stat.
+    *                   - "PVAL": Matrix of corresponding p-values.
+    */
   def BSF_cctP_test (
     Zscores: BDV[Double],
     M: BDM[Double],
     Bstar: BDV[Double],
     PI: BDV[Double]
   ): Map[String, BDM[Double]] = {
+    // conduct a BSF test
     val bsf = BSF_test(Zscores, M, Bstar, PI)
 
-
+    // convert Zscore input into two-sided p-values, and then use these to calculate an overal CCT statistic and p-value
     val Pvalues = Zscores.map(z =>  2.0 * Normal.cumulative(-Math.abs(z), 0.0, 1.0, true, false))
     val cct = cctTest(Pvalues)
     val cctStat = cct("cct").asInstanceOf[Double]
     val cctP = cct("pval_cct").asInstanceOf[Double]
 
-    // Extract STAT and PVAL matrices from the map
+    // Extract STAT and PVAL matrices from the initial BSF test
     val STAT = bsf("STAT").asInstanceOf[BDM[Double]]
     val PVAL = bsf("PVAL").asInstanceOf[BDM[Double]]
 
+    // Flatten the PVAL result, and then append the global CCT p-value
     val PVAL_Vec = PVAL.toDenseVector
-
     val newPVAL = BDV.vertcat(PVAL_Vec(0 until PVAL.size - 1), BDV(cctP))
-    val bsf_cctP = cctTest(newPVAL)
 
+    // Apply a second-stage CCT test on the combined BSF test p-values and the global CCT p-value
+    val bsf_cctP = cctTest(newPVAL)
     val bsf_cctP_stat = bsf_cctP("cct").asInstanceOf[Double]
     val bsf_cctP_pval = bsf_cctP("pval_cct").asInstanceOf[Double]
 
+    // Convert stats and p-values to 1x1 matrices for vertical concatenation
     val cctStatMat = BDM.fill(1, 1)(cctStat)
     val bsf_cctP_statMat = BDM.fill(1, 1)(bsf_cctP_stat)
     val cctPMat = BDM.fill(1, 1)(cctP)
     val bsf_cctP_pvalMat = BDM.fill(1, 1)(bsf_cctP_pval)
 
+    // Concatenate original STAT matrix with CCT and BSF+CCT statistics
     val result_stat = BDM.vertcat(STAT, cctStatMat, bsf_cctP_statMat)
+    // Concatenate original PVAL matrix with CCT p-value and BSF+CCT p-value
     val result_pval = BDM.vertcat(PVAL.asInstanceOf[BDM[Double]], cctPMat, bsf_cctP_pvalMat)
 
     Map("STAT" -> result_stat, "PVAL" -> result_pval)
   }
 
+  /**
+    * Performs the Burden-SKAT-Fisher (BSF) test with Cauchy Combination Test (CCT) enhancements using p-values and Z-score signs.
+    *
+    * @param Pvalues     Vector of two-sided p-values.
+    * @param Zsigns      Vector of Z-score signs (+1 or -1), same length as `Pvalues`.
+    * @param M           Matrix of genotype data or other annotation matrix used in test weight optimization.
+    * @param Bstar       Vector of estimated effect sizes or related weights for variants.
+    * @param PI          Vector of variant-level prior probabilities or weights.
+    *
+    * @return            A Map object containing:
+    *                     - "STAT": a matrix of test statistics (BSF + CCT + BSF+CCT),
+    *                     - "PVAL": a matrix of corresponding p-values.
+    */
   def BSF_cctP_test_byP (
     Pvalues: BDV[Double],
     Zsigns: BDV[Double],
