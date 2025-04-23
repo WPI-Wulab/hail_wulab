@@ -5,6 +5,7 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
 Creators: Kylie Hoar and Peter Howell
 Last update (latest update first):
+  KHoar 2025-04-23: Re-formatted docstrings
   KHoar 2025-04-21: Added comments to SPA-related functions
 */
 
