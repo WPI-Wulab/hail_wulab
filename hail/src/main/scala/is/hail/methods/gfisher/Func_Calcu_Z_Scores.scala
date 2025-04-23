@@ -546,7 +546,7 @@ object FuncCalcuZScores {
 
     // Determine whether to use saddlepoint adjustment
     val cutoffVal: Double = Cutoff match {
-      If "BE", use Berry-Esseen inequality to derive threshold
+      // If "BE", use Berry-Esseen inequality to derive threshold
       case s: String if s == "BE" =>
         val rho = mu.toScalaVector.zip(g.toScalaVector).map {
           case (m, gi) => Math.pow(Math.abs(gi), 3) * m * (1 - m) * (Math.pow(m, 2) + Math.pow(1 - m, 2))
