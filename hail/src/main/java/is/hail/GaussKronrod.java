@@ -66,72 +66,72 @@ public final class GaussKronrod extends Quadrature {
      *                          permitted
      */
     public GaussKronrod(final double tolerance, final double relativeTolerance, final int maxEvaluations) {
-	super(tolerance, maxEvaluations);
-	myRelTol = relativeTolerance;
+		super(tolerance, maxEvaluations);
+		myRelTol = relativeTolerance;
     }
 
     public GaussKronrod(final double tolerance, final int maxEvaluations) {
-	this(tolerance, 50.0 * Math.ulp(1.0), maxEvaluations);
+		this(tolerance, 50.0 * Math.ulp(1.0), maxEvaluations);
     }
 
     @Override
     protected final QuadratureResult properIntegral(final Function<? super Double, Double> f, final double a,
 	    final double b) {
 
-	// prepare variables
-	final double[] result = new double[1];
-	final double[] abserr = new double[1];
-	final int[] neval = new int[1];
-	final int[] ier = new int[1];
+		// prepare variables
+		final double[] result = new double[1];
+		final double[] abserr = new double[1];
+		final int[] neval = new int[1];
+		final int[] ier = new int[1];
 
-	// call main subroutine
-	dqags(f, a, b, myTol, myRelTol, result, abserr, neval, ier, myMaxEvals);
-	return new QuadratureResult(result[0], abserr[0], neval[0], ier[0] == 0);
+		// call main subroutine
+		dqags(f, a, b, myTol, myRelTol, result, abserr, neval, ier, myMaxEvals);
+		return new QuadratureResult(result[0], abserr[0], neval[0], ier[0] == 0);
     }
 
     @Override
     public final QuadratureResult integrate(final Function<? super Double, Double> f, final double a, final double b) {
 
-	// null integral
-	if (a == b) {
-	    return new QuadratureResult(0.0, 0.0, 0, true);
+		// null integral
+		if (a == b) {
+			return new QuadratureResult(0.0, 0.0, 0, true);
+		}
+
+		// make sure a < b
+		if (a > b) {
+			return integrate(f, b, a);
+		}
+
+		// both are finite
+		if (Double.isFinite(a) && Double.isFinite(b)) {
+			return properIntegral(f, a, b);
+		}
+
+		// infinite bounds case
+		final double[] result = new double[1], abserr = new double[1];
+		final int[] neval = new int[1], ier = new int[1];
+		final int inf;
+		final double bound;
+		if (Double.isInfinite(a) && Double.isInfinite(b)) {
+			inf = 2;
+			bound = 0.0;
+		} else if (Double.isFinite(a)) {
+			inf = 1;
+			bound = a;
+		} else {
+			inf = -1;
+			bound = b;
+		}
+
+		// call main subroutine
+		dqagi1(f, bound, inf, myTol, myRelTol, result, abserr, neval, ier, myMaxEvals);
+		return new QuadratureResult(result[0], abserr[0], neval[0], ier[0] == 0);
 	}
 
-	// make sure a < b
-	if (a > b) {
-	    return integrate(f, b, a);
+	@Override
+	public final String getName() {
+		return "Gauss-Kronrod";
 	}
-
-	// both are finite
-	if (Double.isFinite(a) && Double.isFinite(b)) {
-	    return properIntegral(f, a, b);
-	}
-
-	// infinite bounds case
-	final double[] result = new double[1], abserr = new double[1];
-	final int[] neval = new int[1], ier = new int[1];
-	final int inf;
-	final double bound;
-	if (Double.isInfinite(a) && Double.isInfinite(b)) {
-	    inf = 2;
-	    bound = 0.0;
-	} else if (Double.isFinite(a)) {
-	    inf = 1;
-	    bound = a;
-	} else {
-	    inf = -1;
-	    bound = b;
-	}
-
-	// call main subroutine
-	dqagi1(f, bound, inf, myTol, myRelTol, result, abserr, neval, ier, myMaxEvals);
-	return new QuadratureResult(result[0], abserr[0], neval[0], ier[0] == 0);
-    }
-
-    @Override
-    public final String getName() {
-	return "Gauss-Kronrod";
-    }
 
     // *******************************************************************************
     // FINITE BOUNDS INTEGRATION (DQAGS)
@@ -139,345 +139,345 @@ public final class GaussKronrod extends Quadrature {
     private static final void dqags(final Function<? super Double, Double> f, final double a, final double b,
 	    final double epsabs, final double epsrel, final double[] result, final double[] abserr, final int[] neval,
 	    final int[] ier, final int limit) {
-	final int[] last = new int[1];
+		final int[] last = new int[1];
 
-	// CHECK VALIDITY OF LIMIT AND LENW
-	ier[0] = 6;
-	neval[0] = last[0] = 0;
-	result[0] = abserr[0] = 0.0;
-	if (limit < 1) {
-	    return;
-	}
+		// CHECK VALIDITY OF LIMIT AND LENW
+		ier[0] = 6;
+		neval[0] = last[0] = 0;
+		result[0] = abserr[0] = 0.0;
+		if (limit < 1) {
+			return;
+		}
 
-	// PREPARE CALL FOR DQAGSE
-	final double[] alist = new double[limit], blist = new double[limit], rlist = new double[limit],
-		elist = new double[limit];
-	final int[] iwork = new int[limit];
-	dqagse(f, a, b, epsabs, epsrel, limit, result, abserr, neval, ier, alist, blist, rlist, elist, iwork, last);
+		// PREPARE CALL FOR DQAGSE
+		final double[] alist = new double[limit], blist = new double[limit], rlist = new double[limit],
+			elist = new double[limit];
+		final int[] iwork = new int[limit];
+		dqagse(f, a, b, epsabs, epsrel, limit, result, abserr, neval, ier, alist, blist, rlist, elist, iwork, last);
     }
 
     private static final void dqagse(final Function<? super Double, Double> f, final double a, final double b,
 	    final double epsabs, final double epsrel, final int limit, final double[] result, final double[] abserr,
 	    final int[] neval, final int[] ier, final double[] alist, final double[] blist, final double[] rlist,
 	    final double[] elist, final int[] iord, final int[] last) {
-	double area, area12, a1, a2, b1, b2, correc = 0.0, dres, epmach, erlarg = 0.0, erlast, errbnd, erro12, errsum,
-		ertest = 0.0, oflow, small = 0.0, uflow;
-	int id, ierro, iroff1, iroff2, iroff3, jupbnd, k, ksgn, ktmin;
-	boolean extrap, noext;
-	final double[] res3la = new double[3];
-	final double[] rlist2 = new double[52];
-	final double[] abseps = new double[1], area1 = new double[1], area2 = new double[1], defabs = new double[1],
-		defab1 = new double[1], defab2 = new double[1], errmax = new double[1], error1 = new double[1],
-		error2 = new double[1], resabs = new double[1], reseps = new double[1];
-	final int[] maxerr = new int[1], nrmax = new int[1], numrl2 = new int[1], nres = new int[1];
+		double area, area12, a1, a2, b1, b2, correc = 0.0, dres, epmach, erlarg = 0.0, erlast, errbnd, erro12, errsum,
+			ertest = 0.0, oflow, small = 0.0, uflow;
+		int id, ierro, iroff1, iroff2, iroff3, jupbnd, k, ksgn, ktmin;
+		boolean extrap, noext;
+		final double[] res3la = new double[3];
+		final double[] rlist2 = new double[52];
+		final double[] abseps = new double[1], area1 = new double[1], area2 = new double[1], defabs = new double[1],
+			defab1 = new double[1], defab2 = new double[1], errmax = new double[1], error1 = new double[1],
+			error2 = new double[1], resabs = new double[1], reseps = new double[1];
+		final int[] maxerr = new int[1], nrmax = new int[1], numrl2 = new int[1], nres = new int[1];
 
-	epmach = EPMACH;
+		epmach = EPMACH;
 
-	// TEST ON VALIDITY OF PARAMETERS
-	ier[0] = neval[0] = last[0] = 0;
-	result[0] = abserr[0] = 0.0;
-	alist[1 - 1] = a;
-	blist[1 - 1] = b;
-	rlist[1 - 1] = elist[1 - 1] = 0.0;
-	if (epsabs <= 0.0 && epsrel < Math.max(50.0 * epmach, 0.5e-28)) {
-	    ier[0] = 6;
-	    return;
-	}
-
-	// FIRST APPROXIMATION TO THE INTEGRAL
-	uflow = UFLOW;
-	oflow = OFLOW;
-	ierro = 0;
-	dqk21(f, a, b, result, abserr, defabs, resabs);
-
-	// TEST ON ACCURACY
-	dres = Math.abs(result[0]);
-	errbnd = Math.max(epsabs, epsrel * dres);
-	last[0] = 1;
-	rlist[1 - 1] = result[0];
-	elist[1 - 1] = abserr[0];
-	iord[1 - 1] = 1;
-	if (abserr[0] <= 100.0 * epmach * defabs[0] && abserr[0] > errbnd) {
-	    ier[0] = 2;
-	}
-	if (limit == 1) {
-	    ier[0] = 1;
-	}
-	if (ier[0] != 0 || (abserr[0] <= errbnd && abserr[0] != resabs[0]) || abserr[0] == 0.0) {
-	    neval[0] = 42 * last[0] - 21;
-	    return;
-	}
-
-	// INITIALIZATION
-	rlist2[1 - 1] = result[0];
-	errmax[0] = abserr[0];
-	maxerr[0] = 1;
-	area = result[0];
-	errsum = abserr[0];
-	abserr[0] = oflow;
-	nrmax[0] = 1;
-	nres[0] = 0;
-	numrl2[0] = 2;
-	ktmin = 0;
-	extrap = noext = false;
-	iroff1 = iroff2 = iroff3 = 0;
-	ksgn = -1;
-	if (dres >= (1.0 - 50.0 * epmach) * defabs[0]) {
-	    ksgn = 1;
-	}
-
-	// MAIN DO-LOOP
-	for (last[0] = 2; last[0] <= limit; ++last[0]) {
-
-	    // BISECT THE SUBINTERVAL WITH THE NRMAX-TH LARGEST ERROR ESTIMATE
-	    a1 = alist[maxerr[0] - 1];
-	    b1 = 0.5 * (alist[maxerr[0] - 1] + blist[maxerr[0] - 1]);
-	    a2 = b1;
-	    b2 = blist[maxerr[0] - 1];
-	    erlast = errmax[0];
-	    dqk21(f, a1, b1, area1, error1, resabs, defab1);
-	    dqk21(f, a2, b2, area2, error2, resabs, defab2);
-
-	    // IMPROVE PREVIOUS APPROXIMATIONS TO INTEGRAL AND ERROR AND TEST FOR ACCURACY
-	    area12 = area1[0] + area2[0];
-	    erro12 = error1[0] + error2[0];
-	    errsum += erro12 - errmax[0];
-	    area += area12 - rlist[maxerr[0] - 1];
-	    if (defab1[0] != error1[0] && defab2[0] != error2[0]) {
-		final double reltol = 1e-5 * Math.abs(area12);
-		if (Math.abs(rlist[maxerr[0] - 1] - area12) <= reltol && erro12 >= 0.99 * errmax[0]) {
-		    if (extrap) {
-			++iroff2;
-		    } else {
-			++iroff1;
-		    }
+		// TEST ON VALIDITY OF PARAMETERS
+		ier[0] = neval[0] = last[0] = 0;
+		result[0] = abserr[0] = 0.0;
+		alist[1 - 1] = a;
+		blist[1 - 1] = b;
+		rlist[1 - 1] = elist[1 - 1] = 0.0;
+		if (epsabs <= 0.0 && epsrel < Math.max(50.0 * epmach, 0.5e-28)) {
+			ier[0] = 6;
+			return;
 		}
-		if (last[0] > 10 && erro12 > errmax[0]) {
-		    ++iroff3;
+
+		// FIRST APPROXIMATION TO THE INTEGRAL
+		uflow = UFLOW;
+		oflow = OFLOW;
+		ierro = 0;
+		dqk21(f, a, b, result, abserr, defabs, resabs);
+
+		// TEST ON ACCURACY
+		dres = Math.abs(result[0]);
+		errbnd = Math.max(epsabs, epsrel * dres);
+		last[0] = 1;
+		rlist[1 - 1] = result[0];
+		elist[1 - 1] = abserr[0];
+		iord[1 - 1] = 1;
+		if (abserr[0] <= 100.0 * epmach * defabs[0] && abserr[0] > errbnd) {
+			ier[0] = 2;
 		}
-	    }
-	    rlist[maxerr[0] - 1] = area1[0];
-	    rlist[last[0] - 1] = area2[0];
-	    errbnd = Math.max(epsabs, epsrel * Math.abs(area));
-
-	    // TEST FOR ROUNDOFF ERROR AND EVENTUALLY SET ERROR FLAG
-	    if (iroff1 + iroff2 >= 10 || iroff3 >= 20) {
-		ier[0] = 2;
-	    }
-	    if (iroff2 >= 5) {
-		ierro = 3;
-	    }
-
-	    // SET ERROR FLAG IN THE CASE THAT THE NUMBER OF SUBINTERVALS EQUALS LIMIT
-	    if (last[0] == limit) {
-		ier[0] = 1;
-	    }
-
-	    // SET ERROR FLAG IN THE CASE OF BAD INTEGRAND BEHAVIOUR
-	    // AT A POINT OF THE INTEGRATION RANGE
-	    if (Math.max(Math.abs(a1), Math.abs(b2)) <= (1.0 + 100.0 * epmach) * (Math.abs(a2) + 1000.0 * uflow)) {
-		ier[0] = 4;
-	    }
-
-	    // APPEND THE NEWLY-CREATED INTERVALS TO THE LIST
-	    if (error2[0] > error1[0]) {
-		alist[maxerr[0] - 1] = a2;
-		alist[last[0] - 1] = a1;
-		blist[last[0] - 1] = b1;
-		rlist[maxerr[0] - 1] = area2[0];
-		rlist[last[0] - 1] = area1[0];
-		elist[maxerr[0] - 1] = error2[0];
-		elist[last[0] - 1] = error1[0];
-	    } else {
-		alist[last[0] - 1] = a2;
-		blist[maxerr[0] - 1] = b1;
-		blist[last[0] - 1] = b2;
-		elist[maxerr[0] - 1] = error1[0];
-		elist[last[0] - 1] = error2[0];
-	    }
-
-	    // CALL SUBROUTINE DQPSRT TO MAINTAIN THE DESCENDING ORDERING
-	    // IN THE LIST OF ERROR ESTIMATES AND SELECT THE SUBINTERVAL
-	    // WITH NRMAX-TH LARGEST ERROR ESTIMATE (TO BE BISECTED NEXT)
-	    dqpsrt(limit, last[0], maxerr, errmax, elist, iord, nrmax);
-	    if (errsum <= errbnd) {
-
-		// COMPUTE GLOBAL INTEGRAL SUM
-		result[0] = 0.0;
-		for (k = 1; k <= last[0]; ++k) {
-		    result[0] += rlist[k - 1];
+		if (limit == 1) {
+			ier[0] = 1;
 		}
-		abserr[0] = errsum;
+		if (ier[0] != 0 || (abserr[0] <= errbnd && abserr[0] != resabs[0]) || abserr[0] == 0.0) {
+			neval[0] = 42 * last[0] - 21;
+			return;
+		}
+
+		// INITIALIZATION
+		rlist2[1 - 1] = result[0];
+		errmax[0] = abserr[0];
+		maxerr[0] = 1;
+		area = result[0];
+		errsum = abserr[0];
+		abserr[0] = oflow;
+		nrmax[0] = 1;
+		nres[0] = 0;
+		numrl2[0] = 2;
+		ktmin = 0;
+		extrap = noext = false;
+		iroff1 = iroff2 = iroff3 = 0;
+		ksgn = -1;
+		if (dres >= (1.0 - 50.0 * epmach) * defabs[0]) {
+			ksgn = 1;
+		}
+
+		// MAIN DO-LOOP
+		for (last[0] = 2; last[0] <= limit; ++last[0]) {
+
+			// BISECT THE SUBINTERVAL WITH THE NRMAX-TH LARGEST ERROR ESTIMATE
+			a1 = alist[maxerr[0] - 1];
+			b1 = 0.5 * (alist[maxerr[0] - 1] + blist[maxerr[0] - 1]);
+			a2 = b1;
+			b2 = blist[maxerr[0] - 1];
+			erlast = errmax[0];
+			dqk21(f, a1, b1, area1, error1, resabs, defab1);
+			dqk21(f, a2, b2, area2, error2, resabs, defab2);
+
+			// IMPROVE PREVIOUS APPROXIMATIONS TO INTEGRAL AND ERROR AND TEST FOR ACCURACY
+			area12 = area1[0] + area2[0];
+			erro12 = error1[0] + error2[0];
+			errsum += erro12 - errmax[0];
+			area += area12 - rlist[maxerr[0] - 1];
+			if (defab1[0] != error1[0] && defab2[0] != error2[0]) {
+			final double reltol = 1e-5 * Math.abs(area12);
+			if (Math.abs(rlist[maxerr[0] - 1] - area12) <= reltol && erro12 >= 0.99 * errmax[0]) {
+				if (extrap) {
+				++iroff2;
+				} else {
+				++iroff1;
+				}
+			}
+			if (last[0] > 10 && erro12 > errmax[0]) {
+				++iroff3;
+			}
+			}
+			rlist[maxerr[0] - 1] = area1[0];
+			rlist[last[0] - 1] = area2[0];
+			errbnd = Math.max(epsabs, epsrel * Math.abs(area));
+
+			// TEST FOR ROUNDOFF ERROR AND EVENTUALLY SET ERROR FLAG
+			if (iroff1 + iroff2 >= 10 || iroff3 >= 20) {
+			ier[0] = 2;
+			}
+			if (iroff2 >= 5) {
+			ierro = 3;
+			}
+
+			// SET ERROR FLAG IN THE CASE THAT THE NUMBER OF SUBINTERVALS EQUALS LIMIT
+			if (last[0] == limit) {
+			ier[0] = 1;
+			}
+
+			// SET ERROR FLAG IN THE CASE OF BAD INTEGRAND BEHAVIOUR
+			// AT A POINT OF THE INTEGRATION RANGE
+			if (Math.max(Math.abs(a1), Math.abs(b2)) <= (1.0 + 100.0 * epmach) * (Math.abs(a2) + 1000.0 * uflow)) {
+			ier[0] = 4;
+			}
+
+			// APPEND THE NEWLY-CREATED INTERVALS TO THE LIST
+			if (error2[0] > error1[0]) {
+			alist[maxerr[0] - 1] = a2;
+			alist[last[0] - 1] = a1;
+			blist[last[0] - 1] = b1;
+			rlist[maxerr[0] - 1] = area2[0];
+			rlist[last[0] - 1] = area1[0];
+			elist[maxerr[0] - 1] = error2[0];
+			elist[last[0] - 1] = error1[0];
+			} else {
+			alist[last[0] - 1] = a2;
+			blist[maxerr[0] - 1] = b1;
+			blist[last[0] - 1] = b2;
+			elist[maxerr[0] - 1] = error1[0];
+			elist[last[0] - 1] = error2[0];
+			}
+
+			// CALL SUBROUTINE DQPSRT TO MAINTAIN THE DESCENDING ORDERING
+			// IN THE LIST OF ERROR ESTIMATES AND SELECT THE SUBINTERVAL
+			// WITH NRMAX-TH LARGEST ERROR ESTIMATE (TO BE BISECTED NEXT)
+			dqpsrt(limit, last[0], maxerr, errmax, elist, iord, nrmax);
+			if (errsum <= errbnd) {
+
+			// COMPUTE GLOBAL INTEGRAL SUM
+			result[0] = 0.0;
+			for (k = 1; k <= last[0]; ++k) {
+				result[0] += rlist[k - 1];
+			}
+			abserr[0] = errsum;
+			if (ier[0] > 2) {
+				--ier[0];
+			}
+			neval[0] = 42 * last[0] - 21;
+			return;
+			}
+			if (ier[0] != 0) {
+			break;
+			}
+			if (last[0] == 2) {
+			small = Math.abs(b - a) * 0.375;
+			erlarg = errsum;
+			ertest = errbnd;
+			rlist2[2 - 1] = area;
+			continue;
+			}
+			if (noext) {
+			continue;
+			}
+			erlarg -= erlast;
+			if (Math.abs(b1 - a1) > small) {
+			erlarg += erro12;
+			}
+			if (!extrap) {
+
+			// TEST WHETHER THE INTERVAL TO BE BISECTED NEXT IS THE SMALLEST INTERVAL
+			if (Math.abs(blist[maxerr[0] - 1] - alist[maxerr[0] - 1]) > small) {
+				continue;
+			}
+			extrap = true;
+			nrmax[0] = 2;
+			}
+
+			if (ierro != 3 && erlarg > ertest) {
+
+			// THE SMALLEST INTERVAL HAS THE LARGEST ERROR.
+			// BEFORE BISECTING DECREASE THE SUM OF THE ERRORS OVER THE
+			// LARGER INTERVALS (ERLARG) AND PERFORM EXTRAPOLATION
+			id = nrmax[0];
+			jupbnd = last[0];
+			if (last[0] > 2 + (limit >> 1)) {
+				jupbnd = limit + 3 - last[0];
+			}
+			boolean skipto90 = false;
+			for (k = id; k <= jupbnd; ++k) {
+				maxerr[0] = iord[nrmax[0] - 1];
+				errmax[0] = elist[maxerr[0] - 1];
+				if (Math.abs(blist[maxerr[0] - 1] - alist[maxerr[0] - 1]) > small) {
+				skipto90 = true;
+				break;
+				}
+				++nrmax[0];
+			}
+			if (skipto90) {
+				continue;
+			}
+			}
+
+			// PERFORM EXTRAPOLATION
+			++numrl2[0];
+			rlist2[numrl2[0] - 1] = area;
+			dqelg(numrl2, rlist2, reseps, abseps, res3la, nres);
+			++ktmin;
+			if (ktmin > 5 && abserr[0] < 1e-3 * errsum) {
+			ier[0] = 5;
+			}
+			if (abseps[0] < abserr[0]) {
+			ktmin = 0;
+			abserr[0] = abseps[0];
+			result[0] = reseps[0];
+			correc = erlarg;
+			ertest = Math.max(epsabs, epsrel * Math.abs(reseps[0]));
+			if (abserr[0] <= ertest) {
+				break;
+			}
+			}
+
+			// PREPARE BISECTION OF THE SMALLEST INTERVAL
+			if (numrl2[0] == 1) {
+			noext = true;
+			}
+			if (ier[0] == 5) {
+			break;
+			}
+			maxerr[0] = iord[1 - 1];
+			errmax[0] = elist[maxerr[0] - 1];
+			nrmax[0] = 1;
+			extrap = false;
+			small *= 0.5;
+			erlarg = errsum;
+		}
+
+		// SET FINAL RESULT AND ERROR ESTIMATE
+		if (abserr[0] == oflow) {
+
+			// COMPUTE GLOBAL INTEGRAL SUM
+			result[0] = 0.0;
+			for (k = 1; k <= last[0]; ++k) {
+			result[0] += rlist[k - 1];
+			}
+			abserr[0] = errsum;
+			if (ier[0] > 2) {
+			--ier[0];
+			}
+			neval[0] = 42 * last[0] - 21;
+			return;
+		}
+
+		if (ier[0] + ierro != 0) {
+			if (ierro == 3) {
+			abserr[0] += correc;
+			}
+			if (ier[0] == 0) {
+			ier[0] = 3;
+			}
+			if (result[0] != 0.0 && area != 0.0) {
+			if (abserr[0] / Math.abs(result[0]) > errsum / Math.abs(area)) {
+
+				// COMPUTE GLOBAL INTEGRAL SUM
+				result[0] = 0.0;
+				for (k = 1; k <= last[0]; ++k) {
+				result[0] += rlist[k - 1];
+				}
+				abserr[0] = errsum;
+				if (ier[0] > 2) {
+				--ier[0];
+				}
+				neval[0] = 42 * last[0] - 21;
+				return;
+			}
+			} else {
+			if (abserr[0] > errsum) {
+
+				// COMPUTE GLOBAL INTEGRAL SUM
+				result[0] = 0.0;
+				for (k = 1; k <= last[0]; ++k) {
+				result[0] += rlist[k - 1];
+				}
+				abserr[0] = errsum;
+				if (ier[0] > 2) {
+				--ier[0];
+				}
+				neval[0] = 42 * last[0] - 21;
+				return;
+			}
+			if (area == 0.0) {
+				if (ier[0] > 2) {
+				--ier[0];
+				}
+				neval[0] = 42 * last[0] - 21;
+				return;
+			}
+			}
+		}
+
+		// TEST ON DIVERGENCE
+		if (ksgn == -1 && Math.max(Math.abs(result[0]), Math.abs(area)) <= defabs[0] * 0.01) {
+			if (ier[0] > 2) {
+			--ier[0];
+			}
+			neval[0] = 42 * last[0] - 21;
+			return;
+		}
+		if (0.01 > (result[0] / area) || (result[0] / area) > 100.0 || errsum > Math.abs(area)) {
+			ier[0] = 6;
+		}
 		if (ier[0] > 2) {
-		    --ier[0];
+			--ier[0];
 		}
 		neval[0] = 42 * last[0] - 21;
-		return;
-	    }
-	    if (ier[0] != 0) {
-		break;
-	    }
-	    if (last[0] == 2) {
-		small = Math.abs(b - a) * 0.375;
-		erlarg = errsum;
-		ertest = errbnd;
-		rlist2[2 - 1] = area;
-		continue;
-	    }
-	    if (noext) {
-		continue;
-	    }
-	    erlarg -= erlast;
-	    if (Math.abs(b1 - a1) > small) {
-		erlarg += erro12;
-	    }
-	    if (!extrap) {
-
-		// TEST WHETHER THE INTERVAL TO BE BISECTED NEXT IS THE SMALLEST INTERVAL
-		if (Math.abs(blist[maxerr[0] - 1] - alist[maxerr[0] - 1]) > small) {
-		    continue;
-		}
-		extrap = true;
-		nrmax[0] = 2;
-	    }
-
-	    if (ierro != 3 && erlarg > ertest) {
-
-		// THE SMALLEST INTERVAL HAS THE LARGEST ERROR.
-		// BEFORE BISECTING DECREASE THE SUM OF THE ERRORS OVER THE
-		// LARGER INTERVALS (ERLARG) AND PERFORM EXTRAPOLATION
-		id = nrmax[0];
-		jupbnd = last[0];
-		if (last[0] > 2 + (limit >> 1)) {
-		    jupbnd = limit + 3 - last[0];
-		}
-		boolean skipto90 = false;
-		for (k = id; k <= jupbnd; ++k) {
-		    maxerr[0] = iord[nrmax[0] - 1];
-		    errmax[0] = elist[maxerr[0] - 1];
-		    if (Math.abs(blist[maxerr[0] - 1] - alist[maxerr[0] - 1]) > small) {
-			skipto90 = true;
-			break;
-		    }
-		    ++nrmax[0];
-		}
-		if (skipto90) {
-		    continue;
-		}
-	    }
-
-	    // PERFORM EXTRAPOLATION
-	    ++numrl2[0];
-	    rlist2[numrl2[0] - 1] = area;
-	    dqelg(numrl2, rlist2, reseps, abseps, res3la, nres);
-	    ++ktmin;
-	    if (ktmin > 5 && abserr[0] < 1e-3 * errsum) {
-		ier[0] = 5;
-	    }
-	    if (abseps[0] < abserr[0]) {
-		ktmin = 0;
-		abserr[0] = abseps[0];
-		result[0] = reseps[0];
-		correc = erlarg;
-		ertest = Math.max(epsabs, epsrel * Math.abs(reseps[0]));
-		if (abserr[0] <= ertest) {
-		    break;
-		}
-	    }
-
-	    // PREPARE BISECTION OF THE SMALLEST INTERVAL
-	    if (numrl2[0] == 1) {
-		noext = true;
-	    }
-	    if (ier[0] == 5) {
-		break;
-	    }
-	    maxerr[0] = iord[1 - 1];
-	    errmax[0] = elist[maxerr[0] - 1];
-	    nrmax[0] = 1;
-	    extrap = false;
-	    small *= 0.5;
-	    erlarg = errsum;
-	}
-
-	// SET FINAL RESULT AND ERROR ESTIMATE
-	if (abserr[0] == oflow) {
-
-	    // COMPUTE GLOBAL INTEGRAL SUM
-	    result[0] = 0.0;
-	    for (k = 1; k <= last[0]; ++k) {
-		result[0] += rlist[k - 1];
-	    }
-	    abserr[0] = errsum;
-	    if (ier[0] > 2) {
-		--ier[0];
-	    }
-	    neval[0] = 42 * last[0] - 21;
-	    return;
-	}
-
-	if (ier[0] + ierro != 0) {
-	    if (ierro == 3) {
-		abserr[0] += correc;
-	    }
-	    if (ier[0] == 0) {
-		ier[0] = 3;
-	    }
-	    if (result[0] != 0.0 && area != 0.0) {
-		if (abserr[0] / Math.abs(result[0]) > errsum / Math.abs(area)) {
-
-		    // COMPUTE GLOBAL INTEGRAL SUM
-		    result[0] = 0.0;
-		    for (k = 1; k <= last[0]; ++k) {
-			result[0] += rlist[k - 1];
-		    }
-		    abserr[0] = errsum;
-		    if (ier[0] > 2) {
-			--ier[0];
-		    }
-		    neval[0] = 42 * last[0] - 21;
-		    return;
-		}
-	    } else {
-		if (abserr[0] > errsum) {
-
-		    // COMPUTE GLOBAL INTEGRAL SUM
-		    result[0] = 0.0;
-		    for (k = 1; k <= last[0]; ++k) {
-			result[0] += rlist[k - 1];
-		    }
-		    abserr[0] = errsum;
-		    if (ier[0] > 2) {
-			--ier[0];
-		    }
-		    neval[0] = 42 * last[0] - 21;
-		    return;
-		}
-		if (area == 0.0) {
-		    if (ier[0] > 2) {
-			--ier[0];
-		    }
-		    neval[0] = 42 * last[0] - 21;
-		    return;
-		}
-	    }
-	}
-
-	// TEST ON DIVERGENCE
-	if (ksgn == -1 && Math.max(Math.abs(result[0]), Math.abs(area)) <= defabs[0] * 0.01) {
-	    if (ier[0] > 2) {
-		--ier[0];
-	    }
-	    neval[0] = 42 * last[0] - 21;
-	    return;
-	}
-	if (0.01 > (result[0] / area) || (result[0] / area) > 100.0 || errsum > Math.abs(area)) {
-	    ier[0] = 6;
-	}
-	if (ier[0] > 2) {
-	    --ier[0];
-	}
-	neval[0] = 42 * last[0] - 21;
     }
 
     private static final void dqelg(final int[] n, final double[] epstab, final double[] result, final double[] abserr,
