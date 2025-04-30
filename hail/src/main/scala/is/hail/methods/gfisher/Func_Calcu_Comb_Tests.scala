@@ -252,13 +252,13 @@ object FuncCalcuCombTests {
     val clippedPvals = pvals.map(p => if (p > thrLargeP) thrLargeP else p)
 
     // Indicator for small p-values
-    val isSmall = clippedPvals <:< thrSmallP
+    val isSmall: BDV[Boolean] = clippedPvals.map(_ < thrSmallP)
 
     // CCTSTAT initially set to PVAL values
     val CCTSTAT = clippedPvals.copy
 
-    val cct: Double = if (!any(isSmall)) {// this gives a weird warning
-      mean(tan((0.5 - CCTSTAT) * 0.5))  // If no small p-values, use regular transformation
+    val cct: Double = if (!any(isSmall)) {
+      mean(tan((0.5 - CCTSTAT) * Pi))  // If no small p-values, use regular transformation
     } else {
       for (i <- 0 until CCTSTAT.length) {
         if (!isSmall(i)) CCTSTAT(i) = tan((0.5 - CCTSTAT(i)) * Pi)
@@ -496,4 +496,3 @@ object FuncCalcuCombTests {
     val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
     BSF_cctP_test(Zscores, M, Bstar, PI)
   }
-}
