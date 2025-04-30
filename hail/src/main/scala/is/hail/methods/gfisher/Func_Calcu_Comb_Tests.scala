@@ -496,3 +496,4 @@ object FuncCalcuCombTests {
     val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
     BSF_cctP_test(Zscores, M, Bstar, PI)
   }
+}
