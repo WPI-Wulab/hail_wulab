@@ -1,5 +1,5 @@
 /*
-This file contains functions for computing the summation-based Z-score combination statistics and related p-values. The combination statistics are defined as S = sum_i^n w_i*g(Z_i), where g() is a function for transforming Z scores, w_i's are 
+This file contains functions for computing the summation-based Z-score combination statistics and related p-values. The combination statistics are defined as S = sum_i^n w_i*g(Z_i), where g() is a function for transforming Z scores, w_i's are
 scaled weights, and Z_i's are Z scores. The functions in this file are designed to be used for the combination tests in the context of genetic association studies, such as burden test, SKAT test, Fisher test, and GFisher test. Implemtation highly depends on the GFisher library/package. Further implementations for the similar task can be included into this file.
 Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
@@ -40,7 +40,7 @@ object FuncCalcuCombTests {
 
   /**
     * Transformation function g(x) for Z-scores with one-sided input p-values
-    * 
+    *
     * @param x  The Z-score to be transformed. Assumed to follow a standard normal distribution.
     * @param df The degrees of freedom for the resulting Chi-square distribution.
     *
@@ -78,34 +78,34 @@ object FuncCalcuCombTests {
   }
 
   /**
-    * Compute the combination statistic for S = sum_i^n w_i*g(Z_i), given an arbitrary function g(), the weights w_i's, the Z 
+    * Compute the combination statistic for S = sum_i^n w_i*g(Z_i), given an arbitrary function g(), the weights w_i's, the Z
     * scores and their correlation matrix. The p-value can be calculated for burden test and GFisher test.
     *
     * @param g            Function for tranforming Z scores
     * @param Zscores      Vector of Z scores
     * @param wts          Vector of weights, allowing negative values being used in calculating S when is.posi.wts=FALSE
-    * @param calc_p       Logical value indicating whether to calculate p-value. 
-    *                     Currently, p-value calculation is available for 
-    *                      - burden test: when g = function(x)x or df=Inf. Allow for negative weights.                   
+    * @param calc_p       Logical value indicating whether to calculate p-value.
+    *                     Currently, p-value calculation is available for
+    *                      - burden test: when g = function(x)x or df=Inf. Allow for negative weights.
     *                      - GFisher test: output one-sided p-value, which requires non-negative weights.
     *                     One can use the g_GFisher, g_GFisher_one, or g_GFisher_two function, or set proper df argument.
     * @param M            Correlation matrix of the Z scores. Default is NULL.
-    * @param df           Constant degrees of freedom for the GFisher statistic. Default is NULL. 
-    *                     Require to be consistent with the function g. If the function g contains a df argument, that value 
+    * @param df           Constant degrees of freedom for the GFisher statistic. Default is NULL.
+    *                     Require to be consistent with the function g. If the function g contains a df argument, that value
     *                     will be used. df=Inf indicates the burden test.
     * @param p.type       Type of input p-values of GFisher, "one" or "two" sided. Default is "two".
     *                     It is only used when the function g is for GFisher test.
     *                     If the function g contains p.type as an argument, that value will be used.
     * @param is.posi.wts  Logical value indicating whether negative weights are casted to be 0. Default is TRUE.
     *                     calc_p=TRUE for GFisher test will force the weights to be non-negative and then normalized.
-    * @param method       For p.GFisher: "MR" = simulation-assisted moment ratio matching, 
-    *                                    "HYB" = moment ratio matching by quadratic approximation, 
+    * @param method       For p.GFisher: "MR" = simulation-assisted moment ratio matching,
+    *                                    "HYB" = moment ratio matching by quadratic approximation,
     *                                    "GB" = Brown's method with calculated variance. See details in the reference.
     * @param nsim         For p.GFisher: Number of simulation used in the "MR" method, default = 5e4.
     * @param seed         For p.GFisher: Seed for random number generation, default = NULL.
     *
-    * NOTE: When calculating the statistics only (i.e., calcu_p=FALSE), the g function is pretty arbitrary, and the weights can 
-    * be negative. This can be used for empirical studies (e.g., empirical type I error or power). The weights are always scaled 
+    * NOTE: When calculating the statistics only (i.e., calcu_p=FALSE), the g function is pretty arbitrary, and the weights can
+    * be negative. This can be used for empirical studies (e.g., empirical type I error or power). The weights are always scaled
     * to be wts/sum(abs(wts)).
     *
     * @return S           The combination statistic
@@ -131,8 +131,8 @@ object FuncCalcuCombTests {
     }
 
     // always scale the weights
-    if (sum(abs(weights)) > 0) { // this gives a weird warning
-      weights = weights / sum(abs(weights))// this gives a weird warning
+    if (sum(abs(weights)) > 0) {
+      weights = weights / sum(abs(weights))
     }
 
     // calculate the statistic S using the provided g function
@@ -162,7 +162,7 @@ object FuncCalcuCombTests {
         // rescale the weights
         weights = weights/sum(weights.map(math.abs))
         // recalculate the S to be consistent with the new weights
-        val S_ = sum(weights * g(Zscores))
+        val S_ = weights dot g(Zscores)
         // calculate pGFisher (HYB)
         lazy val matrix: BDM[Double] = M.getOrElse(BDM.zeros[Double](numRows, numCols))
         val p = PGFisher.pGFisherHyb(S_, degreesOfFreedom, weights, matrix)
@@ -237,7 +237,7 @@ object FuncCalcuCombTests {
     * Performs the Cauchy Combination Test (CCT) to combine a vector of p-values into a single p-value.
     *
     * The CCT method is particularly robust for combining dependent p-values and handles extremely small or large
-    * p-values by applying appropriate transformations. When small p-values are present (below `thrSmallP`), it uses 
+    * p-values by applying appropriate transformations. When small p-values are present (below `thrSmallP`), it uses
     * a special approximation to avoid numerical instability.
     *
     * @param pvals      Vector of p-values to be combined.
@@ -350,23 +350,23 @@ object FuncCalcuCombTests {
     val wtsEqu = BDM.ones[Double](1, M.cols) // Equal weights as row vector
 
     // Burden Test
-    val gBurden: Double => Double = x => x
     val statDFBurden = Double.PositiveInfinity
-    val wtsOptBurden = OptimalWeights.optimalWeightsM(gBurden, Bstar, PI, M, true, true)
+    val wtsOptBurden = OptimalWeights.optimalWeightsM_Burden(Bstar, PI, M, true)
     val WT_opt_burden = BDM.vertcat(wtsOptBurden, wtsEqu)
     val DF_opt_burden = BDM.fill(WT_opt_burden.rows, 1)(statDFBurden)
 
     // SKAT Test
     val gSKAT: Double => Double = x => x * x
     val statDFSKAT = 1.0
-    val wtsOptSKAT = OptimalWeights.optimalWeightsM(gSKAT, Bstar, PI, M, false, true)
+    val wtsOptSKAT = OptimalWeights.optimalWeightsM(gSKAT, Bstar, PI, M, false, false, true)
     val WT_opt_skat = BDM.vertcat(wtsOptSKAT, wtsEqu)
     val DF_opt_skat = BDM.fill(WT_opt_skat.rows, 1)(statDFSKAT)
 
     // Fisher Test
-    val gFisher: Double => Double = x => g_GFisher_two(x, 2)
+    val gFisher: Double => Double = x => g_GFisher_two(x, 2.0)
     val statDFFisher = 2.0
-    val wtsOptFisher = OptimalWeights.optimalWeightsM(gFisher, Bstar, PI, M, false, true)
+    // the wtsOptFisher does not seem to be very accurate compared to R as of now.
+    val wtsOptFisher = OptimalWeights.optimalWeightsM(gFisher, Bstar, PI, M, false, true, true) // mae is 1.86e-4
     val WT_opt_fisher = BDM.vertcat(wtsOptFisher, wtsEqu)
     val DF_opt_fisher = BDM.fill(WT_opt_fisher.rows, 1)(statDFFisher)
 
@@ -413,7 +413,7 @@ object FuncCalcuCombTests {
   }
 
   /**
-    * Performs the Burden-SKAT-Fisher (BSF) omnibus test and augments it with two additional 
+    * Performs the Burden-SKAT-Fisher (BSF) omnibus test and augments it with two additional
     * Cauchy Combination Test (CCT) p-values to enhance power and robustness.
     *
     * This test includes:

@@ -51,8 +51,15 @@ object OptimalWeights {
     pi: BDV[Double],
     M: BDM[Double],
     burden: Boolean,
+    fisher: Boolean = false,
     forcePositiveWeights: Boolean=true
   ): BDM[Double] = {
+
+    // I couldn't find a way to check if two functions are identical in scala, so I just added another argument to do the liptak/burden test
+    if (burden) {
+      return optimalWeightsM_Burden(bStar, pi, M, forcePositiveWeights)
+    }
+
     val n = bStar.length
     val mu: BDV[Double] = bStar *:* pi  // mean of theta (random effects)
     val mmu: BDV[Double] = M * mu // mean of marginal Z-scores when effects are random
@@ -60,25 +67,20 @@ object OptimalWeights {
     // I think (`diag(v) * M` is equal to `v *:* M(::, *)`, and I believe the former is faster)
     val MVM: BDM[Double] = (v *:* M(::, *)).t * M // faster way to compute M'VM, when V is a diagonal matrix. M+MVM is the variance matrix of marginal Z-scores when effects are random
 
-    // I couldn't find a way to check if two functions are identical in scala, so I just added another argument to do the liptak/burden test
-    if (burden) {
-      return optimalWeightsM_Burden(bStar, pi, M, forcePositiveWeights)
-    }
-
     // Normal approximation
 
-    val rTilde: BDV[Double] = getRTilde(g, mmu, diag(M + MVM))
+    val rTilde: BDV[Double] = getRTilde(g, mmu, diag(M + MVM), fisher) // off by average of 2.57e-5 :(
 
     //Bahadur efficiency (BE)
-    val sigmaBETilde: BDM[Double] = covM_gXgY(g, BDV.zeros[Double](n), BDV.zeros[Double](n), M)
-    val wts_BE = getWts(sigmaBETilde, rTilde, forcePositiveWeights)
+    val sigmaBETilde: BDM[Double] = covM_gXgY(g, BDV.zeros[Double](n), BDV.zeros[Double](n), M) // accurate to 1e-16
+    val wts_BE = getWts(sigmaBETilde, rTilde, forcePositiveWeights) // off by average of 3.27e-4 :(
     // asymptotic power rate (APE?)
     val sigmaAPETilde: BDM[Double] = covM_gXgY(g, mmu, mmu, M + MVM)
     val wts_APE: BDV[Double] = getWts(sigmaAPETilde, rTilde, forcePositiveWeights)
 
     // Sparse approximation
 
-    val r = getR(g, bStar, pi)
+    val r = getR(g, bStar, pi, fisher)
     // Bahadur efficiency
     val sigmaBE = getSigma(g, bStar, pi, M, h1 = false)
     val wts_BE_sparse = getWts(sigmaBE, r, forcePositiveWeights)
@@ -98,17 +100,15 @@ object OptimalWeights {
     val n = bStar.size
     val mu: BDV[Double] = bStar *:* pi  // mean of theta (random effects)
     val v: BDV[Double] = (bStar ^:^ 2.0) *:* pi *:* (1.0 - pi) // variance of theta (random effects)
-    // I think (`diag(v) * M` is equal to `v *:* M(::, *)`, and I believe the latter is slightly faster)
 
-    // I couldn't find a way to check if two functions are identical in scala, so I just added another argument to do the liptak/burden test
     val wts_BE = mu
     val wts_APE = inv(BDM.eye[Double](n) + (v *:* M(::, *))) * mu
     if (forcePositiveWeights) {
       wts_APE(wts_APE <:< 0.0) := 0.0
       wts_BE(wts_BE <:< 0.0) := 0.0
     }
-    wts_BE := wts_BE / (sum(abs(wts_BE)) / n)
-    wts_APE := wts_APE / (sum(abs(wts_APE)) / n)
+    wts_BE := wts_BE / (mean(abs(wts_BE)))
+    wts_APE := wts_APE / (mean(abs(wts_APE)))
     return BDM(wts_BE, wts_APE)
   }
 
@@ -157,6 +157,19 @@ object OptimalWeights {
     return (HHalf, y0, resids)
   }
 
+  /**
+    * Calculate the vector of E_1(T_i)-E_0(T_i) for i=1,...,n
+    * where T_i=g(Z_i), Z_i = Z_0i + Ztilde_i, Ztilde_i ~ N(mu_i,sd_i), Z_0i~N(0,1)
+    *
+    * @param g transfrmation function of Z
+    * @param mu vector of mean mu_i, i=1,...,n.
+    * @param sd vector of standard deviations of Z_i, i=1,...,n.
+    */
+  def getRTilde(g: (Double) => Double, mmu: BDV[Double], sd: BDV[Double], fisher: Boolean): BDV[Double] = {
+    val n = mmu.size
+    val e0 = if (fisher) 2.0 else E_gX_p(g, 0.0, 1.0, 1.0)
+    return BDV.tabulate(n){(i) => E_gX_p(g, mmu(i),  1.0, sd(i)) - e0}
+  }
 
   /**
     * Calculate E[g(X)^p] where X~N(mu,sigma)
@@ -167,7 +180,7 @@ object OptimalWeights {
     * @param sigma std
     */
   def E_gX_p(g: Double => Double, mu: Double, p: Double, sigma:Double=1.0): Double = {
-    val integrator = new GaussKronrod(1e-9, 100)
+    val integrator = new GaussKronrod(1e-12, 100)
     return integrator.integrate((x) => math.pow(g(x), p) * Normal.density((x-mu)/sigma, 0, 1.0, false), mu-8*sigma, mu+8*sigma).estimate / sigma
   }
 
@@ -210,21 +223,58 @@ object OptimalWeights {
     * alternatively: accept an integer that just represents number of terms to use
     */
   def covM_gXgY(g: Double => Double, mu1: BDV[Double], mu2: BDV[Double], M: BDM[Double], ORD: Seq[Int]=Seq(1,2,3,4,5,6,7,8)): BDM[Double] = {
+    val mu1U = mu1.toArray.distinct
+    val mu2U = mu2.toArray.distinct
+    val coef1 = BDM.zeros[Double](ORD.size, mu1.size)
+    val coef2 = BDM.zeros[Double](ORD.size, mu2.size)
     val integrator = new GaussKronrod(1e-9, 100)
-    val coef1 = BDM.tabulate(ORD.size, mu1.size){(i, j) =>
-      integrator.integrate(
-        (x) => covM_Integrand(x, g, mu1(j), ORD(i)),
-        mu1(j)-8.0,
-        mu1(j)+8.0
-      ).estimate
+    for (i <- 0 until ORD.size) {
+
+      for (j <- 0 until mu1U.size) {
+
+        val c = integrator.integrate(
+          (x) => covM_Integrand(x, g, mu1U(j), ORD(i)),
+          mu1U(j)-8.0,
+          mu1U(j)+8.0
+        ).estimate
+        for (k <- 0 until mu1.size) {
+          if (mu1(k) == mu1U(j)) {
+            coef1(i, k) = c
+          }
+        }
+      }
     }
-    val coef2 = BDM.tabulate(ORD.size, mu2.size){(i, j) =>
-      integrator.integrate(
-        (x) => covM_Integrand(x, g, mu2(j), ORD(i)),
-        mu2(j)-8.0,
-        mu2(j)+8.0
-      ).estimate
+    for (i <- 0 until ORD.size) {
+
+      for (j <- 0 until mu2U.size) {
+
+        val c = integrator.integrate(
+          (x) => covM_Integrand(x, g, mu2U(j), ORD(i)),
+          mu2U(j)-8.0,
+          mu2U(j)+8.0
+        ).estimate
+        for (k <- 0 until mu2.size) {
+          if (mu2(k) == mu2U(j)) {
+            coef2(i, k) = c
+          }
+        }
+      }
     }
+    // val coef1 = BDM.tabulate(ORD.size, mu1.size){(i, j) =>
+    //   integrator.integrate(
+    //     (x) => covM_Integrand(x, g, mu1(j), ORD(i)),
+    //     mu1(j)-8.0,
+    //     mu1(j)+8.0
+    //   ).estimate
+    // }
+    // val coef2 = BDM.tabulate(ORD.size, mu2.size){(i, j) =>
+    //   integrator.integrate(
+    //     (x) => covM_Integrand(x, g, mu2(j), ORD(i)),
+    //     mu2(j)-8.0,
+    //     mu2(j)+8.0
+    //   ).estimate
+    // }
+
     val M_out = BDM.zeros[Double](mu1.size, mu1.size)
     for (ord <- ORD) {
       // outer product of the rows of the coefficient matrices
@@ -285,7 +335,7 @@ object OptimalWeights {
     * @param pi
     */
   def varT_mix(g: (Double) => Double, mu: Double, pi: Double): Double = {
-    return pi * E_gX_p(g, mu, 2.0) + (1.0 - pi) * E_gX_p(g, 0.0, 2.0)  - math.pow(E_T_mix(g, mu, pi), 2.0)
+    return pi * E_gX_p(g, mu, 2.0) + (1.0 - pi) * E_gX_p(g, 0.0, 2.0)  - math.pow(E_T_mix(g, mu, pi, false), 2.0)
   }
 
   /**
@@ -295,19 +345,11 @@ object OptimalWeights {
     * @param mu
     * @param pi
     */
-  def E_T_mix(g: (Double) => Double, mu: Double, pi: Double): Double = {
-    return pi * E_gX_p(g, mu, 1) + (1.0 - pi) * E_gX_p(g, 0.0, 1)
-  }
-
-  /**
-    * Calculate E[T_i], where T_i=g(Z_i), Z_i = Z_0i + mu_i*C_i, C_i ~ Bern(pi_i)
-    *
-    * @param g
-    * @param mu
-    * @param pi
-    */
-  def E_T_mix(g: (Double) => Double, mu: BDV[Double], pi: BDV[Double]): BDV[Double] = {
-    return BDV.tabulate(mu.length){i => E_T_mix(g, mu(i), pi(i))}
+  def E_T_mix(g: (Double) => Double, mu: Double, pi: Double, fisher: Boolean): Double = {
+    val e0 = if(fisher) 2.0 else E_gX_p(g, 0.0, 1)
+    if (pi == 0)
+      return e0
+    return pi * E_gX_p(g, mu, 1) + (1.0 - pi) * e0
   }
 
   def getSigma(g: (Double) => Double, mu: BDV[Double], pi: BDV[Double], M: BDM[Double], h1: Boolean = false): BDM[Double] = {
@@ -318,22 +360,10 @@ object OptimalWeights {
     return covMT_mix(g, nullMu, nullMu, M)
   }
 
-  def getR(g: (Double) => Double, mu: BDV[Double], pi: BDV[Double]): BDV[Double] = {
+  def getR(g: (Double) => Double, mu: BDV[Double], pi: BDV[Double], fisher: Boolean): BDV[Double] = {
     val n = mu.size
-    return BDV.tabulate(n){(i) => E_T_mix(g, mu(i), pi(i)) - E_T_mix(g, 0.0, 0.0) }
-  }
-
-  /**
-    * Calculate the vector of E_1(T_i)-E_0(T_i) for i=1,...,n
-    * where T_i=g(Z_i), Z_i = Z_0i + Ztilde_i, Ztilde_i ~ N(mu_i,sd_i), Z_0i~N(0,1)
-    *
-    * @param g transfrmation function of Z
-    * @param mu vector of mean mu_i, i=1,...,n.
-    * @param sd vector of standard deviations of Z_i, i=1,...,n.
-    */
-  def getRTilde(g: (Double) => Double, mu: BDV[Double], sd: BDV[Double]): BDV[Double] = {
-    val n = mu.size
-    return BDV.tabulate(n){(i) => E_gX_p(g, mu(i),  1.0, sd(i)) - E_gX_p(g, 0.0, 1.0, 1.0) }
+    val e0 = E_T_mix(g, 0.0, 0.0, fisher)
+    return BDV.tabulate(n){(i) => E_T_mix(g, mu(i), pi(i), fisher) -  e0}
   }
 
 

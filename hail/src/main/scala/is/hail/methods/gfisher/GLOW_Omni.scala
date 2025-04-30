@@ -19,7 +19,7 @@ object GLOW_Omni {
       * A testing procedure that contains Burden, SKAT, Fisher with their optimal & equal weights and the CCT of them. Use Z-scores as input.
       *
       * Adapted from the GLOW R package ("GLOW_R_package/GLOW/R/GLOW_Omni.R")
-      * 
+      *
       * @param Zout  Output from "getZMargScore" or "getZ_marg_score_binary_SPA", which requires G, X, Y information.
       * @param B     Numeric vector of B (effect size) for estimating optimal weights.
       * @param PI    Numeric vector of PI (causal likelihood) for estimating optimal weights.
@@ -38,7 +38,7 @@ object GLOW_Omni {
         // Collect outputs from the "getZMargScore" function input Zout
         val M = Zout("M_Z").asInstanceOf[BDM[Double]]
         val s0 = Zout("s0").asInstanceOf[Double]
-        val Bstar = (sqrt(diag(Zout("M_s").asInstanceOf[BDM[Double]])) * B.asInstanceOf[BDV[Double]]) / s0
+        val Bstar = (sqrt(diag(Zout("M_s").asInstanceOf[BDM[Double]])) *:* B.asInstanceOf[BDV[Double]]) / s0
         val Zscores = Zout("Zscores").asInstanceOf[BDV[Double]]
 
         // Run the omnibus CCT test on the provided Z-scores

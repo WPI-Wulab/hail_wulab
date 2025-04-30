@@ -12,7 +12,7 @@ import is.hail.types.virtual.{MatrixType, TFloat64, TStruct, TableType, TArray, 
 import is.hail.utils._
 
 import is.hail.methods.gfisher.OptimalWeights.{getH_Binary, getH_Continuous}
-import is.hail.methods.gfisher.FuncCalcuZScores.{getZMargScoreBinary, getZMargScoreContinuous, getZMargScoreContinuousT}
+import is.hail.methods.gfisher.FuncCalcuZScores.{getZMargScoreBinary, getZMargScoreContinuous, getZMargScoreContinuousT, getZ_marg_score_binary_SPA}
 import org.apache.spark.sql.Row
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
@@ -23,14 +23,9 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
   * @author Peter Howell
   *
   * @param keyField name of field to group by
-  * @param pField name of field containing p-values
-  * @param dfField name of field containing degrees of freedom
-  * @param weightField name of field containing weights
-  * @param corrField name of field containing correlation arrays
-  * @param rowIDXField name of field containing indices of the rows in the correlation matrix
-  * @param method which method to use. Either HYB, MR, or GB
   * @param oneSided whether the input p-values are one-sided
   * @param method what test to conduct. Either BURDEN, SKAT, OMNI, or FISHER
+  *
   */
 case class GLOW(
   keyField: String,
@@ -43,6 +38,7 @@ case class GLOW(
   logistic: Boolean,
   method: String,
   useT: Boolean,
+  useSPA: Boolean,
 ) extends MatrixToTableFunction {
 
   // define the return type of the function
@@ -115,6 +111,7 @@ case class GLOW(
         val (b: BDV[Double], pi: BDV[Double], geno: BDM[Double]) = GFisherArrayToVectors.glow(valArr)
 
         val zstats = getZMargScoreContinuous(geno, HhalfBC.value, s0BC.value, residsBC.value)
+
         val result = method match {
           case "BURDEN" => GLOW_Burden.GLOW_Burden(zstats, b, pi)
           case "SKAT" => GLOW_SKAT.GLOW_SKAT(zstats, b, pi)
@@ -124,29 +121,52 @@ case class GLOW(
         }
 
         Row(key, n, result("STAT").toArray.toFastSeq, result("PVAL").toArray.toFastSeq)
+
       }
     }
 
     def logisticGlow() = {
-      val (hH, y0, resids) = getH_Binary(cov, y)
-      val HhalfBC = HailContext.backend.broadcast(hH)
-      val y0BC = HailContext.backend.broadcast(y0)
-      val residsBC = HailContext.backend.broadcast(resids)
-      groupedRDD.map{case(key, vals) =>
-        val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
-        val n = valArr.length
-        val (b: BDV[Double], pi: BDV[Double], geno: BDM[Double]) = GFisherArrayToVectors.glow(valArr)
+      if (useSPA) {
+        val y0BC = HailContext.backend.broadcast(y)
+        val XBC = HailContext.backend.broadcast(cov)
+        groupedRDD.map{case(key, vals) =>
+          val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
+          val n = valArr.length
+          val (b: BDV[Double], pi: BDV[Double], geno: BDM[Double]) = GFisherArrayToVectors.glow(valArr)
 
-        val zstats = getZMargScoreBinary(geno, HhalfBC.value, y0BC.value, residsBC.value)
-        val result = method match {
-          case "BURDEN" => GLOW_Burden.GLOW_Burden(zstats, b, pi)
-          case "SKAT" => GLOW_SKAT.GLOW_SKAT(zstats, b, pi)
-          case "OMNI" => GLOW_Omni.GLOW_Omni(zstats, b, pi)
-          case "FISHER" => GLOW_Fisher.GLOW_Fisher(zstats, b, pi)
-          case _ => fatal(s"Unknown method: $method")
+          val zstats = getZ_marg_score_binary_SPA(geno, XBC.value, y0BC.value)
+          val result = method match {
+            case "BURDEN" => GLOW_Burden.GLOW_Burden(zstats, b, pi)
+            case "SKAT" => GLOW_SKAT.GLOW_SKAT(zstats, b, pi)
+            case "OMNI" => GLOW_Omni.GLOW_Omni(zstats, b, pi)
+            case "FISHER" => GLOW_Fisher.GLOW_Fisher(zstats, b, pi)
+            case _ => fatal(s"Unknown method: $method")
+          }
+
+          Row(key, n, result("STAT").toArray.toFastSeq, result("PVAL").toArray.toFastSeq)
         }
+      }
+      else {
+        val (hH, y0, resids) = getH_Binary(cov, y)
+        val HhalfBC = HailContext.backend.broadcast(hH)
+        val y0BC = HailContext.backend.broadcast(y0)
+        val residsBC = HailContext.backend.broadcast(resids)
+        groupedRDD.map{case(key, vals) =>
+          val valArr = vals.toArray// array of the rows in this group. each element is a tuple with all the fields.
+          val n = valArr.length
+          val (b: BDV[Double], pi: BDV[Double], geno: BDM[Double]) = GFisherArrayToVectors.glow(valArr)
 
-        Row(key, n, result("STAT").toArray.toFastSeq, result("PVAL").toArray.toFastSeq)
+          val zstats = getZMargScoreBinary(geno, HhalfBC.value, y0BC.value, residsBC.value)
+          val result = method match {
+            case "BURDEN" => GLOW_Burden.GLOW_Burden(zstats, b, pi)
+            case "SKAT" => GLOW_SKAT.GLOW_SKAT(zstats, b, pi)
+            case "OMNI" => GLOW_Omni.GLOW_Omni(zstats, b, pi)
+            case "FISHER" => GLOW_Fisher.GLOW_Fisher(zstats, b, pi)
+            case _ => fatal(s"Unknown method: $method")
+          }
+
+          Row(key, n, result("STAT").toArray.toFastSeq, result("PVAL").toArray.toFastSeq)
+        }
       }
     }
 
