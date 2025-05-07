@@ -1,6 +1,13 @@
 /**
+  * This file contains the supporting functions for the GFisher and oGFisher pipelines, allowing for connectivity between the
+  * Scala code base and the GFisher python user interface.
+  * Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
+           calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
   * @author Peter Howell
+  * Last update (latest update first):
+  *   KHoar 2025-05-07: Added header to file
   */
+
 package is.hail.methods.gfisher
 
 import is.hail.backend.ExecuteContext

@@ -1,3 +1,12 @@
+/**
+  * File that contains the functions to compute covariance matrix for w_iT_i,i=1,...,n.
+  * Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
+           calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
+  * @author Peter Howell
+  * Last update (latest update first):
+  *   KHoar 2025-05-07: Added header to file
+  */
+
 package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}

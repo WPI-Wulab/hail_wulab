@@ -1,3 +1,12 @@
+/**
+  * File that contains the functions necessary to support GFisher and GLOW calculations
+  * Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
+           calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
+  * @author Peter Howell and Kylie Hoar
+  * Last update (latest update first):
+  *   KHoar 2025-05-07: Added header to file
+  */
+
 package is.hail.methods
 
 import is.hail.stats.eigSymD

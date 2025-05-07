@@ -1,3 +1,16 @@
+/**
+  * This file contains functions for calculating the optimal weights w_i's for stat S = sum_i^n w_iT_i, where T_i=g(Z_i), 
+  * where Z_i's are the marginal Zscore statistics obtained under regression 
+  * models with random effects:  $\beta_i = b_i C_i$, where $C_i \sim Bernoulli(\pi_i)$
+  * indicates the SNV is causal or not, with the likelihood of causality $\pi_i$, 
+  * and allelic effect is $b_i$.
+  * Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
+           calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
+  * @author Peter Howell
+  * Last update (latest update first):
+  *   KHoar 2025-05-07: Added header to file
+  */
+
 package is.hail.methods.gfisher
 
 import is.hail.GaussKronrod

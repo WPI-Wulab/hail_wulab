@@ -1,3 +1,12 @@
+/**
+  * This file contains the function to calculate eigenvalues needed for quadratic approximation.
+  * Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
+           calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
+  * @author Peter Howell
+  * Last update (latest update first):
+  *   KHoar 2025-05-07: Added header to file
+  */
+
 package is.hail.methods.gfisher
 
 import is.hail.stats.eigSymD

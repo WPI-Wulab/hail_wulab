@@ -1,6 +1,12 @@
 /**
+  * This file contains the supporting functions for the GLOW pipeline, allowing for connectivity between the
+  * Scala code base and the GLOW python user interface.
+  * Reference: Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
   * @author Peter Howell
+  * Last update (latest update first):
+  *   KHoar 2025-05-07: Added header to file
   */
+
 package is.hail.methods.gfisher
 
 import is.hail.HailContext

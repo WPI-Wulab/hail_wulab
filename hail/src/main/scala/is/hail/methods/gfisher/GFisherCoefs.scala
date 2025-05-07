@@ -1,3 +1,13 @@
+/**
+  * File that contains the functions to compute necessary coefficients for estimating the covariance of the test statistics
+  * Handles both one and two-sided inputs
+  * Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination and accurate p‐value
+           calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
+  * @author Peter Howell
+  * Last update (latest update first):
+  *   KHoar 2025-05-07: Added header to file
+  */
+
 package is.hail.methods.gfisher
 
 import breeze.linalg.{DenseVector => BDV}
