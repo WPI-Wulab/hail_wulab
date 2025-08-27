@@ -3305,10 +3305,100 @@ def ogfisher(key, pval, df, w, n_tests, genotype=None, corr=None, corr_idx=None,
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 
 
-@typecheck(mt=MatrixTable, y_field=str, x_field=str, cov_fields=sequenceof(str), nm=int)
-def graphlet_screening(mt, y_field, x_field, cov_fields, nm=3) -> Table:
-    config = {'name': 'GraphletScreening', 'yField': y_field, 'xField': x_field, 'covFields': cov_fields, 'nm': nm}
-    return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
+@typecheck(
+    mt=MatrixTable,
+    y=oneof(expr_float64, sequenceof(expr_float64)),
+    x=expr_float64,
+    covariates=sequenceof(expr_float64),
+    nm=int,
+    r=float,
+    block_size=int,
+    pass_through=sequenceof(oneof(str, Expression)),
+)
+def graphlet_screening(mt, y, x, covariates, nm=3, r=3.5, block_size=16, pass_through=()) -> Table:
+    """Perform graphlet screening regression on genetic data.
+    
+    Parameters
+    ----------
+    mt : :class:`.MatrixTable`
+        Input matrix table.
+    y : :class:`.Float64Expression` or :obj:`list` of :class:`.Float64Expression`
+        One or more column-indexed response expressions.
+    x : :class:`.Float64Expression`
+        Entry-indexed expression for input variable.
+    covariates : :obj:`list` of :class:`.Float64Expression`
+        List of column-indexed covariate expressions.
+    nm : :obj:`int`
+        Maximum subgraph size (default: 3).
+    r : :obj:`float`
+        Signal strength parameter (default: 3.5).
+    block_size : :obj:`int`
+        Number of row regressions to perform simultaneously per core (default: 16).
+    pass_through : :obj:`list` of :class:`str` or :class:`.Expression`
+        Additional row fields to include in the resulting table.
+        
+    Returns
+    -------
+    :class:`.Table`
+        Table with beta coefficients for each variant and phenotype.
+    """
+    mt = matrix_table_source('graphlet_screening/x', x)
+    raise_unless_entry_indexed('graphlet_screening/x', x)
+
+    # Handle y as either single value or list
+    y_is_list = isinstance(y, list)
+    if y_is_list and len(y) == 0:
+        raise ValueError("'graphlet_screening': found no values for 'y'")
+    
+    y = wrap_to_list(y)
+    y_field_names = [f'__y_{i}' for i in range(len(y))]
+
+    for e in y:
+        analyze('graphlet_screening/y', e, mt._col_indices)
+
+    # Handle covariates - convert expressions to field names
+    cov_field_names = []
+    cov_dict = {}
+    for i, e in enumerate(covariates):
+        analyze('graphlet_screening/covariates', e, mt._col_indices)
+        cov_field_name = f'__cov{i}'
+        cov_field_names.append(cov_field_name)
+        cov_dict[cov_field_name] = e
+
+    _warn_if_no_intercept('graphlet_screening', covariates)
+
+    x_field_name = Env.get_uid()
+    row_fields = _get_regression_row_fields(mt, pass_through, 'graphlet_screening')
+
+    # Select all necessary fields
+    mt = mt._select_all(
+        col_exprs=dict(**dict(zip(y_field_names, y)), **cov_dict),
+        row_exprs=row_fields,
+        col_key=[],
+        entry_exprs={x_field_name: x},
+    )
+
+    config = {
+        'name': 'GraphletScreening',
+        'yFields': y_field_names,
+        'xField': x_field_name,
+        'covFields': cov_field_names,
+        'rowBlockSize': block_size,
+        'passThrough': [x for x in row_fields if x not in mt.row_key],
+        'nm': nm,
+        'r': r,
+    }
+    
+    ht_result = Table(ir.MatrixToTableApply(mt._mir, config))
+    
+    # If y was a single value, unwrap the array
+    if not y_is_list:
+        original_keys = ht_result.key
+        ht_result = ht_result.key_by()
+        ht_result = ht_result.transmute(beta=ht_result.beta[0])
+        ht_result = ht_result.key_by(*original_keys)
+    
+    return ht_result.persist()
 
 
 @typecheck(p_value=expr_numeric, approximate=bool)

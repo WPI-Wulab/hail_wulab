@@ -158,6 +158,7 @@ __all__ = [
     'utils',
     'version',
     'ANY_REGION',
+    'graphlet_screening',
 ]
 
 __all__.extend(genetics.__all__)
