@@ -1057,7 +1057,23 @@ class MatrixToTableApply(TableIR):
             )
             return hl.ttable(hl.tstruct(), my_type, [key_field_out])
         elif name == 'GraphletScreening':
-            return hl.ttable(hl.tstruct(), hl.tstruct(beta=hl.tarray(hl.tfloat64)), ['beta'])
+            pass_through = self.config['passThrough']
+            gs_type = hl.tstruct(
+                n=hl.tint32,
+                n_total=hl.tint32,
+                n_train=hl.tint32,
+                n_test=hl.tint32,
+                selected=hl.tarray(hl.tbool),
+                beta=hl.tarray(hl.tfloat64),
+                standard_error=hl.tarray(hl.tfloat64),
+                t_stat=hl.tarray(hl.tfloat64),
+                p_value=hl.tarray(hl.tfloat64),
+            )
+            return hl.ttable(
+                hl.tstruct(),
+                child_typ.row_key_type._insert_fields(**{f: child_typ.row_type[f] for f in pass_through})._concat(gs_type),
+                child_typ.row_key,
+            )
         else:
             assert name == 'LocalLDPrune', name
             return hl.ttable(

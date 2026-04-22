@@ -46,7 +46,9 @@ object RegressionUtils {
     }
 
     val nMissing = missingCompleteCols.size
-    val mean = sum / (n - nMissing)
+    val mean =
+      if (nMissing < n) sum / (n - nMissing)
+      else 0.0
     var i = 0
     while (i < nMissing) {
       data(offset + missingCompleteCols(i)) = mean

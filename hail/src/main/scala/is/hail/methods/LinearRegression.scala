@@ -25,13 +25,13 @@ case class LinearRegressionRowsSingle(
   override def typ(childType: MatrixType): TableType = {
     val passThroughType = TStruct(passThrough.map(f => f -> childType.rowType.field(f).typ): _*)
     val schema = TStruct(
-      ("n", TInt32),
-      ("sum_x", TFloat64),
-      ("y_transpose_x", TArray(TFloat64)),
-      ("beta", TArray(TFloat64)),
-      ("standard_error", TArray(TFloat64)),
-      ("t_stat", TArray(TFloat64)),
-      ("p_value", TArray(TFloat64)),
+      ("n", TInt32), // number of complete samples
+      ("sum_x", TFloat64), // sum of input values x
+      ("y_transpose_x", TArray(TFloat64)), // y^T * X
+      ("beta", TArray(TFloat64)), // beta coefficients
+      ("standard_error", TArray(TFloat64)), // standard errors
+      ("t_stat", TArray(TFloat64)), // t-statistics
+      ("p_value", TArray(TFloat64)), // p-values
     )
     TableType(
       childType.rowKeyStruct ++ passThroughType ++ schema,

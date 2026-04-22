@@ -5,32 +5,28 @@ import is.hail.backend.ExecuteContext
 import is.hail.annotations._
 import is.hail.expr.ir.{IntArrayBuilder, MatrixValue, TableValue}
 import is.hail.expr.ir.functions.MatrixToTableFunction
-import is.hail.stats.RegressionUtils
+import is.hail.stats.{LogisticRegressionModel, RegressionUtils, pnorm}
 import is.hail.types.physical.PStruct
-import is.hail.types.virtual.{MatrixType, TArray, TFloat64, TInt32, TStruct, TableType}
+import is.hail.types.virtual.{MatrixType, TArray, TBoolean, TFloat64, TInt32, TStruct, TableType}
 import is.hail.utils._
 import is.hail.annotations.{RegionValueBuilder, WritableRegionValue}
-import org.apache.spark.sql.Row
+import is.hail.io.{BufferSpec, TypedCodecSpec}
 import breeze.linalg.DenseMatrix._
 import breeze.linalg.DenseVector._
 import breeze.linalg._
 import breeze.linalg.diag
 import breeze.linalg.eigSym
-import breeze.linalg.inv
 import breeze.linalg.sum
 import breeze.linalg.svd
-import breeze.linalg.csvwrite
-import breeze.linalg.CSCMatrix
 
-import breeze.numerics.sqrt
-
-import breeze.stats.distributions.Gaussian
-import breeze.stats.distributions.Uniform
 import breeze.stats.distributions.RandBasis
+import breeze.stats.distributions.StudentsT
+import breeze.numerics.{sqrt => breezeSqrt}
 
+import scala.collection.mutable
 import scala.util.Random
-import java.io.File
-import java.io.PrintWriter
+
+import org.apache.spark.sql.Row
 
 /**
  * Graphlet Regression
@@ -60,6 +56,257 @@ object GraphletRegression {
       if (sigma > tol) 1.0 / sigma else 0.0
     })
     vt.t * diag(sInv) * u.t
+  }
+
+  private def solveLinearSystem(
+    mat: DenseMatrix[Double],
+    rhs: DenseVector[Double]
+  ): DenseVector[Double] = {
+    try {
+      mat \ rhs
+    } catch {
+      case _: Throwable => ginv(mat) * rhs
+    }
+  }
+
+  private def solveLinearSystem(
+    mat: DenseMatrix[Double],
+    rhs: DenseMatrix[Double]
+  ): DenseMatrix[Double] = {
+    try {
+      mat \ rhs
+    } catch {
+      case _: Throwable => ginv(mat) * rhs
+    }
+  }
+
+  private val FamilyAuto = "auto"
+  private val FamilyLinear = "linear"
+  private val FamilyLogistic = "logistic"
+
+  private def selectedMask(p: Int, selectedCols: IndexedSeq[Int]): DenseVector[Boolean] = {
+    val selected = DenseVector.fill[Boolean](p)(false)
+    selectedCols.foreach(selected(_) = true)
+    selected
+  }
+
+  private def designFromSelected(
+    XVariants: DenseMatrix[Double],
+    covariates: DenseMatrix[Double],
+    selectedCols: IndexedSeq[Int]
+  ): (DenseMatrix[Double], Int) = {
+    val Xsel =
+      if (selectedCols.isEmpty) DenseMatrix.zeros[Double](XVariants.rows, 0)
+      else subMatrix(XVariants, (0 until XVariants.rows), selectedCols)
+    if (covariates.cols > 0) {
+      (DenseMatrix.horzcat(covariates, Xsel), covariates.cols)
+    } else {
+      (Xsel, 0)
+    }
+  }
+
+  private def computeQ(covariates: DenseMatrix[Double]): DenseMatrix[Double] =
+    if (covariates.cols > 0) qr.reduced.justQ(covariates)
+    else DenseMatrix.zeros[Double](covariates.rows, 0)
+
+  private def residualize(X: DenseMatrix[Double], q: DenseMatrix[Double]): DenseMatrix[Double] =
+    if (q.cols == 0) X else X - (q * (q.t * X))
+
+  private def residualize(y: DenseVector[Double], q: DenseMatrix[Double]): DenseVector[Double] =
+    if (q.cols == 0) y else y - (q * (q.t * y))
+
+  private def standardizeColumns(
+    X: DenseMatrix[Double],
+    minNorm: Double = 1e-8
+  ): DenseMatrix[Double] = {
+    val standardized = DenseMatrix.zeros[Double](X.rows, X.cols)
+    var j = 0
+    while (j < X.cols) {
+      var norm2 = 0.0
+      var i = 0
+      while (i < X.rows) {
+        val value = X(i, j)
+        norm2 += value * value
+        i += 1
+      }
+      val norm = math.sqrt(norm2)
+      val scale =
+        if (norm > minNorm) 1.0 / norm
+        else 0.0
+      i = 0
+      while (i < X.rows) {
+        standardized(i, j) = X(i, j) * scale
+        i += 1
+      }
+      j += 1
+    }
+    standardized
+  }
+
+  private def logisticCovariates(covariates: DenseMatrix[Double], n: Int): DenseMatrix[Double] =
+    if (covariates.cols > 0) covariates else DenseMatrix.ones[Double](n, 1)
+
+  private def isBinaryResponse(y: DenseVector[Double]): Boolean =
+    y.forall(yi => yi == 0d || yi == 1d)
+
+  private def resolveFamily(y: DenseVector[Double], requestedFamily: String): String =
+    requestedFamily match {
+      case FamilyAuto =>
+        if (isBinaryResponse(y)) FamilyLogistic else FamilyLinear
+      case FamilyLinear | FamilyLogistic => requestedFamily
+      case other => fatal(s"Unsupported graphlet screening family '$other'.")
+    }
+
+  private def validateLogisticResponse(y: DenseVector[Double]): Unit = {
+    if (!isBinaryResponse(y))
+      fatal("For logistic graphlet screening, y must be numeric with all present values equal to 0 or 1.")
+
+    val sumY = sum(y)
+    if (sumY == 0d || sumY == y.length.toDouble)
+      fatal("For logistic graphlet screening, y must be non-constant.")
+  }
+
+  private def prepareLinearSelectionData(
+    XVariants: DenseMatrix[Double],
+    y: DenseVector[Double],
+    covariates: DenseMatrix[Double]
+  ): (DenseMatrix[Double], DenseVector[Double]) = {
+    val q = computeQ(covariates)
+    val xAdjusted = residualize(XVariants, q)
+    (standardizeColumns(xAdjusted), residualize(y, q))
+  }
+
+  private def prepareLogisticSelectionData(
+    XVariants: DenseMatrix[Double],
+    y: DenseVector[Double],
+    covariates: DenseMatrix[Double],
+    maxIterations: Int,
+    tolerance: Double
+  ): (DenseMatrix[Double], DenseVector[Double]) = {
+    validateLogisticResponse(y)
+    val nullCovariates = logisticCovariates(covariates, y.length)
+    val nullModel = new LogisticRegressionModel(nullCovariates, y)
+    val nullFit = nullModel.fit(maxIter = maxIterations, tol = tolerance)
+    if (!nullFit.converged)
+      fatal(
+        "Failed to fit graphlet screening logistic null model: " + (
+          if (nullFit.exploded)
+            s"exploded at Newton iteration ${nullFit.nIter}"
+          else
+            "Newton iteration failed to converge"
+        )
+      )
+
+    val mu = breeze.numerics.sigmoid(nullCovariates * nullFit.b)
+    val sqrtW = breezeSqrt(mu *:* (1d - mu))
+    val weightedCovariates = nullCovariates(::, *) *:* sqrtW
+    val weightedVariants = XVariants(::, *) *:* sqrtW
+    val q = computeQ(weightedCovariates)
+    val xAdjusted = residualize(weightedVariants, q)
+    val yAdjusted = (y - mu) /:/ sqrtW
+    (standardizeColumns(xAdjusted), yAdjusted)
+  }
+
+  private def refitOlsAdjusted(
+    XVariants: DenseMatrix[Double],
+    y: DenseVector[Double],
+    covariates: DenseMatrix[Double],
+    selectedCols: IndexedSeq[Int]
+  ): GSResult = {
+    val n = XVariants.rows
+    val p = XVariants.cols
+    val selected = selectedMask(p, selectedCols)
+    val betaFull = DenseVector.zeros[Double](p)
+    val seFull = DenseVector.fill[Double](p)(Double.NaN)
+    val tFull = DenseVector.fill[Double](p)(Double.NaN)
+    val pFull = DenseVector.fill[Double](p)(Double.NaN)
+
+    if (selectedCols.isEmpty) {
+      return GSResult(betaFull, seFull, tFull, pFull, selected, nTrain = n, nTest = n)
+    }
+
+    val (design, offset) = designFromSelected(XVariants, covariates, selectedCols)
+    val xtx = design.t * design
+    val xtxInv = ginv(xtx)
+    val betaHat = xtxInv * (design.t * y)
+    val residuals = y - (design * betaHat)
+    val df = n - design.cols
+    val sigma2 = if (df > 0) (residuals.t * residuals) / df.toDouble else Double.NaN
+    val varBeta = xtxInv * sigma2
+    val se = DenseVector((0 until betaHat.length).map(i => math.sqrt(varBeta(i, i))).toArray)
+    val tStat = DenseVector((0 until betaHat.length).map { i =>
+      if (se(i).isNaN || se(i) == 0.0) Double.NaN else betaHat(i) / se(i)
+    }.toArray)
+    val pVal =
+      if (df > 0) {
+        implicit val basis: RandBasis = RandBasis.withSeed(0)
+        val dist = StudentsT(df.toDouble)
+        DenseVector((0 until tStat.length).map { i =>
+          val t = math.abs(tStat(i))
+          if (t.isNaN) Double.NaN else 2.0 * (1.0 - dist.cdf(t))
+        }.toArray)
+      } else DenseVector.fill[Double](tStat.length)(Double.NaN)
+
+    for ((colIdx, j) <- selectedCols.zipWithIndex) {
+      betaFull(colIdx) = betaHat(offset + j)
+      seFull(colIdx) = se(offset + j)
+      tFull(colIdx) = tStat(offset + j)
+      pFull(colIdx) = pVal(offset + j)
+    }
+
+    GSResult(betaFull, seFull, tFull, pFull, selected, nTrain = n, nTest = n)
+  }
+
+  private def refitLogisticAdjusted(
+    XVariants: DenseMatrix[Double],
+    y: DenseVector[Double],
+    covariates: DenseMatrix[Double],
+    selectedCols: IndexedSeq[Int],
+    maxIterations: Int,
+    tolerance: Double
+  ): GSResult = {
+    validateLogisticResponse(y)
+    val n = XVariants.rows
+    val p = XVariants.cols
+    val selected = selectedMask(p, selectedCols)
+    val betaFull = DenseVector.zeros[Double](p)
+    val seFull = DenseVector.fill[Double](p)(Double.NaN)
+    val zFull = DenseVector.fill[Double](p)(Double.NaN)
+    val pFull = DenseVector.fill[Double](p)(Double.NaN)
+
+    if (selectedCols.isEmpty) {
+      return GSResult(betaFull, seFull, zFull, pFull, selected, nTrain = n, nTest = n)
+    }
+
+    val covForRefit = logisticCovariates(covariates, n)
+    val (design, offset) = designFromSelected(XVariants, covForRefit, selectedCols)
+    val nullModel = new LogisticRegressionModel(covForRefit, y)
+    val nullFit = nullModel.fit(maxIter = maxIterations, tol = tolerance)
+    if (!nullFit.converged) {
+      return GSResult(betaFull, seFull, zFull, pFull, selected, nTrain = n, nTest = n)
+    }
+
+    val fit = new LogisticRegressionModel(design, y).fit(Some(nullFit), maxIter = maxIterations, tol = tolerance)
+    if (!fit.converged || fit.fisher.isEmpty) {
+      return GSResult(betaFull, seFull, zFull, pFull, selected, nTrain = n, nTest = n)
+    }
+
+    try {
+      val se = breezeSqrt(diag(inv(fit.fisher.get)))
+      val z = fit.b /:/ se
+      val pVal = z.map(zi => 2 * pnorm(-math.abs(zi)))
+      for ((colIdx, j) <- selectedCols.zipWithIndex) {
+        betaFull(colIdx) = fit.b(offset + j)
+        seFull(colIdx) = se(offset + j)
+        zFull(colIdx) = z(offset + j)
+        pFull(colIdx) = pVal(offset + j)
+      }
+    } catch {
+      case _: breeze.linalg.MatrixSingularException =>
+      case _: breeze.linalg.NotConvergedException =>
+    }
+
+    GSResult(betaFull, seFull, zFull, pFull, selected, nTrain = n, nTest = n)
   }
 
   /**
@@ -173,6 +420,16 @@ object GraphletRegression {
 
   case class QPSolution(solution: DenseVector[Double], value: Double)
 
+  case class GSResult(
+    beta: DenseVector[Double],
+    standardError: DenseVector[Double],
+    tStat: DenseVector[Double],
+    pValue: DenseVector[Double],
+    selected: DenseVector[Boolean],
+    nTrain: Int,
+    nTest: Int
+  )
+
   /**
    * Solves a quadratic programming problem using enumeration of active sets.
    * @param Q Quadratic term matrix
@@ -198,11 +455,17 @@ object GraphletRegression {
     }
     var bestSolution: Option[DenseVector[Double]] = None
     var bestValue: Double = Double.PositiveInfinity
-    val xUnconstrained = inv(Q) * dvec
-    if (satisfiesConstraints(xUnconstrained)) {
-      val valUnconstrained = objective(xUnconstrained)
-      bestSolution = Some(xUnconstrained)
-      bestValue = valUnconstrained
+    val xUnconstrainedOpt = try {
+      Some(solveLinearSystem(Q, dvec))
+    } catch {
+      case _: Throwable => None
+    }
+    xUnconstrainedOpt.foreach { xUnconstrained =>
+      if (satisfiesConstraints(xUnconstrained)) {
+        val valUnconstrained = objective(xUnconstrained)
+        bestSolution = Some(xUnconstrained)
+        bestValue = valUnconstrained
+      }
     }
     val totalSubsets = 1 << n
     for (maskInt <- 1 until totalSubsets) {
@@ -214,8 +477,12 @@ object GraphletRegression {
       val K_bottom = DenseMatrix.horzcat(A_S.t, DenseMatrix.zeros[Double](r, r))
       val K = DenseMatrix.vertcat(K_top, K_bottom)
       val rhs = DenseVector.vertcat(dvec, b_S)
-      try {
-        val sol = inv(K) * rhs
+      val solOpt = try {
+        Some(solveLinearSystem(K, rhs))
+      } catch {
+        case _: Throwable => None
+      }
+      solOpt.foreach { sol =>
         val xCandidate = sol(0 until n)
         if (satisfiesConstraints(xCandidate)) {
           val objVal = objective(xCandidate)
@@ -224,8 +491,6 @@ object GraphletRegression {
             bestSolution = Some(xCandidate)
           }
         }
-      } catch {
-        case _: Exception =>
       }
     }
     bestSolution match {
@@ -311,6 +576,7 @@ object GraphletRegression {
   def screeningStep(yTilde: DenseVector[Double],
                     gram: DenseMatrix[Double],
                     cgAll: List[DenseMatrix[Int]],
+                    pGlobal: Int,
                     nm: Int,
                     v: Double,
                     r: Double,
@@ -318,8 +584,9 @@ object GraphletRegression {
                     scale: Double = 1.0): DenseVector[Boolean] = {
     def safeSqrt(x: Double): Double = if (x > 0.0) math.sqrt(x) else 0.0
     val p  = yTilde.length
+    val pAsymptotic = math.max(2, pGlobal)
     val q1 = math.pow(v + r, 2) / (r * r) / 4.0
-    val tau  = math.sqrt(2.0 * r * math.log(p))
+    val tau  = math.sqrt(2.0 * r * math.log(pAsymptotic))
     val tau1 = math.sqrt(q1) * tau * math.sqrt(scale)
     var survivor = yTilde.map(x => math.abs(x) > tau1)
     var indices  = which(survivor)
@@ -348,7 +615,7 @@ object GraphletRegression {
                   val g_ds_es = subMatrix(gram, dsIdx, esIdx)
                   val g_es_es = subMatrix(gram, esIdx, esIdx)
                   val g_es_ds = subMatrix(gram, esIdx, dsIdx)
-                  g_ds_ds - (g_ds_es * (inv(g_es_es) * g_es_ds))
+                  g_ds_ds - (g_ds_es * solveLinearSystem(g_es_es, g_es_ds))
                 } else {
                   subMatrix(gram, dsIdx, dsIdx)
                 }
@@ -384,7 +651,7 @@ object GraphletRegression {
                 val term1Sqrt = safeSqrt(expr1)
                 val term2Sqrt = safeSqrt(expr2)
                 val deltadelta = v * v / coor / 4.0 - term1Sqrt + term2Sqrt
-                scale * 2.0 * math.log(p) * (
+                scale * 2.0 * math.log(pAsymptotic) * (
                   coor * 1.25 - v * d / 2.0 - term2Sqrt + deltadelta * parityFactor
                 )
               } else {
@@ -418,50 +685,111 @@ object GraphletRegression {
   }
 
   /**
+   * Creates the full connected component starting from startIdx using BFS.
+   * @param startIdx Starting index
+   * @param omega Adjacency matrix
+   * @param remain Boolean mask of remaining nodes
+   * @return IndexedSeq of cluster indices
+   */
+  private def growClusterWithSize(startIdx: Int,
+                                  omega: DenseMatrix[Double],
+                                  remain: DenseVector[Boolean]): IndexedSeq[Int] = {
+    val visited = mutable.LinkedHashSet[Int]()
+    val queue   = mutable.Queue[Int]()
+    val enqueued = mutable.Set[Int]()
+    queue.enqueue(startIdx)
+    enqueued += startIdx
+    while (queue.nonEmpty) {
+      val node = queue.dequeue()
+      if (!visited.contains(node)) {
+        visited += node
+        val neighbors = (0 until omega.cols).iterator
+          .filter(j => remain(j) && omega(node, j) != 0.0 && !visited.contains(j) && !enqueued.contains(j))
+        neighbors.foreach { nbr =>
+          queue.enqueue(nbr)
+          enqueued += nbr
+        }
+      }
+    }
+    visited.toIndexedSeq
+  }
+
+  private def growClusterUpToSize(startIdx: Int,
+                                  omega: DenseMatrix[Double],
+                                  remain: DenseVector[Boolean],
+                                  maxClusterSize: Int): IndexedSeq[Int] = {
+    val visited = mutable.LinkedHashSet[Int]()
+    val queue = mutable.Queue[Int]()
+    val enqueued = mutable.Set[Int]()
+    queue.enqueue(startIdx)
+    enqueued += startIdx
+    while (queue.nonEmpty && visited.size < maxClusterSize) {
+      val node = queue.dequeue()
+      if (!visited.contains(node)) {
+        visited += node
+        if (visited.size < maxClusterSize) {
+          val neighbors = (0 until omega.cols).iterator
+            .filter(j => remain(j) && omega(node, j) != 0.0 && !visited.contains(j) && !enqueued.contains(j))
+          neighbors.foreach { nbr =>
+            if (visited.size + queue.size < maxClusterSize) {
+              queue.enqueue(nbr)
+              enqueued += nbr
+            }
+          }
+        }
+      }
+    }
+    visited.toIndexedSeq
+  }
+
+  /**
    * Carries out the cleaning stage.
    * @param survivor Boolean mask of survivors
    * @param yTilde Transformed response vector
    * @param gram Gram matrix
    * @param lambda Penalty parameter
    * @param uu Constraint threshold
+   * @param maxClusterSize Maximum cluster size to explore
    * @return Estimated coefficient vector
    */
   def cleaningStep(survivor: DenseVector[Boolean],
                    yTilde: DenseVector[Double],
                    gram: DenseMatrix[Double],
                    lambda: Double,
-                   uu: Double): DenseVector[Double] = {
+                   uu: Double,
+                   maxClusterSize: Int = 20,
+                   approximateLargeClusters: Boolean = false): DenseVector[Double] = {
+    require(maxClusterSize >= 1, "maxClusterSize must be at least 1.")
     val p = gram.cols
     val survIndices = which(survivor)
     val nSurvivor = survIndices.length
+    println(s"[GS] cleaningStep: survivors=$nSurvivor, maxClusterSize=$maxClusterSize, approximateLargeClusters=$approximateLargeClusters")
     val yt = subVector(yTilde, survIndices)
     val omega = subMatrix(gram, survIndices, survIndices)
     var beta = DenseVector.zeros[Double](nSurvivor)
     var remain = DenseVector.fill[Boolean](nSurvivor)(true)
+    var nClusters = 0
+    val tStart = System.nanoTime()
     while (remain.data.exists(x => x)) {
       val idxCandidates = which(remain)
       val i = idxCandidates.head
-      var cluster = DenseVector.fill[Boolean](nSurvivor)(false)
-      cluster(i) = true
-      var newCluster = DenseVector.zeros[Boolean](nSurvivor)
-      for (j <- 0 until nSurvivor) {
-        newCluster(j) = omega(j, i) != 0.0
-      }
-      while (!allEqual(cluster, newCluster)) {
-        cluster = newCluster.copy
-        val selectedCols = which(cluster)
-        newCluster = DenseVector((0 until nSurvivor).map { j =>
-          var sumVal = 0.0
-          for (col <- selectedCols) {
-            sumVal += math.abs(omega(j, col))
-          }
-          sumVal != 0.0
-        }.toArray)
-      }
-      if (which(cluster).length > 20) {
-        throw new Exception(s"cluster too long. The cluster length is ${which(cluster).length}")
-      }
-      val clusterIndices = which(cluster)
+      val fullClusterIndices = growClusterWithSize(i, omega, remain)
+      val clusterIndices =
+        if (fullClusterIndices.length > maxClusterSize && approximateLargeClusters) {
+          println(
+            s"[GS] cleaningStep: truncating connected component from size ${fullClusterIndices.length} to $maxClusterSize for approximate cleaning"
+          )
+          growClusterUpToSize(i, omega, remain, maxClusterSize)
+        } else {
+          fullClusterIndices
+        }
+      if (fullClusterIndices.length > maxClusterSize && !approximateLargeClusters)
+        fatal(
+          s"Graphlet screening encountered a connected component of size ${fullClusterIndices.length}, " +
+            s"which exceeds maxClusterSize=$maxClusterSize. " +
+            s"This matches the original R implementation's exact-cleaning limit; " +
+            s"increase maxClusterSize or sparsify the graph more aggressively."
+        )
       val omegaCluster = subMatrix(omega, clusterIndices, clusterIndices)
       val ytCluster = subVector(yt, clusterIndices)
       val betaCluster = PMLE(omegaCluster, ytCluster, lambda, uu)
@@ -469,10 +797,18 @@ object GraphletRegression {
         beta(origIdx) = betaCluster(j)
       for (origIdx <- clusterIndices)
         remain(origIdx) = false
+      nClusters += 1
+      if (nClusters % 25 == 0) {
+        val nRemain = which(remain).length
+        val elapsedSec = (System.nanoTime() - tStart) / 1e9
+        println(f"[GS] cleaningStep: clusters=$nClusters, remaining=$nRemain, elapsed=${elapsedSec}%.2fs")
+      }
     }
     val betaGS = DenseVector.zeros[Double](p)
     for ((origIdx, j) <- survIndices.zipWithIndex)
       betaGS(origIdx) = beta(j)
+    val elapsedSec = (System.nanoTime() - tStart) / 1e9
+    println(f"[GS] cleaningStep: complete, clusters=$nClusters, elapsed=${elapsedSec}%.2fs")
     betaGS
   }
 
@@ -523,7 +859,19 @@ object GraphletRegression {
     }
     if (lc >= 3) {
       for (ii <- 3 to lc) {
-        cgAll(ii-1) = findCG(adjacencyMatrix, cgAll(ii-2))
+        val next = try {
+          findCG(adjacencyMatrix, cgAll(ii - 2))
+        } catch {
+          case _: IllegalArgumentException => DenseMatrix.zeros[Int](0, ii)
+        }
+        cgAll(ii - 1) = next
+        if (next.rows == 0) {
+          var jj = ii + 1
+          while (jj <= lc) {
+            cgAll(jj - 1) = DenseMatrix.zeros[Int](0, jj)
+            jj += 1
+          }
+        }
       }
     }
     cgAll.toList
@@ -627,6 +975,7 @@ object GraphletRegression {
              gram: DenseMatrix[Double],
              gramBias: DenseMatrix[Double],
              cgAll: List[DenseMatrix[Int]],
+             pGlobal: Int,
              sp: Double,
              tau: Double,
              nm: Int,
@@ -634,13 +983,16 @@ object GraphletRegression {
              scale: Double = 1.0,
              maxIter: Int = 3,
              stdThresh: Double = 1.05,
-             betaInitial: Option[DenseVector[Double]] = None
+             betaInitial: Option[DenseVector[Double]] = None,
+             maxClusterSize: Int = 7,
+             approximateLargeClusters: Boolean = false
             ): (DenseVector[Double], Int) = {
     val p = gram.cols
-    val r = math.pow(tau, 2) / (2 * math.log(p))
-    val v = 1.0 - math.log(sp) / math.log(p)
-    val uu = math.sqrt(2 * r * math.log(p))
-    val lambda = math.sqrt(2 * v * math.log(p))
+    val pAsymptotic = math.max(2, pGlobal)
+    val r = math.pow(tau, 2) / (2 * math.log(pAsymptotic))
+    val v = 1.0 - math.log(sp) / math.log(pAsymptotic)
+    val uu = math.sqrt(2 * r * math.log(pAsymptotic))
+    val lambda = math.sqrt(2 * v * math.log(pAsymptotic))
     val betaInit = betaInitial.getOrElse {
       val signY = yTilde.map(math.signum)
       val absY  = yTilde.map(math.abs)
@@ -650,7 +1002,9 @@ object GraphletRegression {
     var betaGS = betaInit.copy
     var w = yTilde.copy
     var nIteration = 0
+    println(s"[GS] iterGS: start p=$p, nm=$nm, maxIter=$maxIter, maxClusterSize=$maxClusterSize, approximateLargeClusters=$approximateLargeClusters")
     for (it <- 1 to maxIter) {
+      val tIterStart = System.nanoTime()
       val meanW = sum(w) / p.toDouble
       val lastWStd = math.sqrt((sum(w *:* w) - p * meanW * meanW) / (p - 1))
       val lastBeta = betaGS.copy
@@ -667,65 +1021,208 @@ object GraphletRegression {
       w = yTilde - adjustment
       val newMeanW = sum(w) / p.toDouble
       val newWStd = math.sqrt((sum(w *:* w) - p * newMeanW * newMeanW) / (p - 1))
+      println(f"[GS] iterGS: iteration=$it, lastWStd=$lastWStd%.4f, newWStd=$newWStd%.4f")
       if (newWStd > stdThresh * lastWStd) {
         nIteration = it - 1
+        val elapsedSec = (System.nanoTime() - tIterStart) / 1e9
+        println(f"[GS] iterGS: iteration=$it early-stop (std threshold), elapsed=${elapsedSec}%.2fs")
         return (betaGS, nIteration)
       }
-      val survivorMask = screeningStep(w, gram, cgAll, nm, v, r, q0, scale)
-      betaGS = cleaningStep(survivorMask, w, gram, lambda, uu)
+      val tScreenStart = System.nanoTime()
+      val survivorMask = screeningStep(w, gram, cgAll, pGlobal, nm, v, r, q0, scale)
+      val screenSec = (System.nanoTime() - tScreenStart) / 1e9
+      val nSurvivor = which(survivorMask).length
+      println(f"[GS] iterGS: iteration=$it screening complete, survivors=$nSurvivor, elapsed=${screenSec}%.2fs")
+      val tCleanStart = System.nanoTime()
+      betaGS = cleaningStep(survivorMask, w, gram, lambda, uu, maxClusterSize, approximateLargeClusters)
+      val cleanSec = (System.nanoTime() - tCleanStart) / 1e9
+      val nnzBeta = which(betaGS.map(_ != 0.0)).length
+      println(f"[GS] iterGS: iteration=$it cleaning complete, nnzBeta=$nnzBeta, elapsed=${cleanSec}%.2fs")
       nIteration = it
+      val iterSec = (System.nanoTime() - tIterStart) / 1e9
+      println(f"[GS] iterGS: iteration=$it done, totalElapsed=${iterSec}%.2fs")
     }
+    println(s"[GS] iterGS: finished, nIteration=$nIteration")
     (betaGS, nIteration)
   }
 
   /**
-   * Runs Iterative Graphlet Screening on the given data.
-   * @param X Design matrix
-   * @param Y Response vector
-   * @param nm Maximum subgraph size
-   * @param r Signal strength parameter
-   * @return Estimated beta vector
+   * Selection-aware inference via sample-splitting:
+   * - Use a training split for Graphlet Screening (selection).
+   * - Refit OLS on the held-out split for unbiased (selection-aware) stats.
    */
-  def execute(X: DenseMatrix[Double],
-              Y: DenseVector[Double],
-              nm: Int = 3,
-              r: Double = 3.5): DenseVector[Double] = {
-    println("Graphlet Screening has begun")
-    println("X: " + X)
-    println("Y: " + Y)
-    println("nm: " + nm)
-    println("r: " + r)
-    val p = X.cols
-    val gram = X.t * X
-    val delta = 1.0 / math.log(p)
+  def executeSelectionAware(
+    XVariants: DenseMatrix[Double],
+    Y: DenseVector[Double],
+    covariates: DenseMatrix[Double],
+    family: String = FamilyAuto,
+    nm: Int = 3,
+    r: Double = 3.5,
+    selectionAware: Boolean = true,
+    splitFraction: Double = 0.5,
+    seed: Int = 1,
+    maxClusterSize: Int = 20,
+    sparsityLevel: Double = -1.0,
+    approximateLargeClusters: Boolean = false,
+    pGlobal: Int = -1,
+    maxIterations: Int = 25,
+    tolerance: Double = 1e-6
+  ): GSResult = {
+    if (selectionAware)
+      require(splitFraction > 0.0 && splitFraction < 1.0, "splitFraction must be in (0, 1)")
+
+    val n = XVariants.rows
+    val pLocal = XVariants.cols
+    require(n > 1, "Need at least 2 samples for sample splitting.")
+    require(pLocal > 0, "Need at least 1 variant for graphlet screening.")
+    val effectivePGlobal = if (pGlobal > 0) pGlobal else pLocal
+    val defaultSp = math.pow(effectivePGlobal.toDouble, 0.5)
+    val effectiveSp =
+      if (sparsityLevel > 0.0) sparsityLevel
+      else defaultSp
+    println(
+      s"[GS] executeSelectionAware: n=$n, pLocal=$pLocal, pGlobal=$effectivePGlobal, family=$family, nm=$nm, r=$r, sp=$effectiveSp, selectionAware=$selectionAware, splitFraction=$splitFraction, maxClusterSize=$maxClusterSize, approximateLargeClusters=$approximateLargeClusters"
+    )
+
+    val rng = new Random(seed)
+    val allIdx = (0 until n).toIndexedSeq
+    val (trainIdx, testIdx) =
+      if (selectionAware) {
+        val indices = rng.shuffle(allIdx.toList)
+        val nTrain = math.max(1, math.min(n - 1, (n * splitFraction).toInt))
+        (indices.take(nTrain).toIndexedSeq, indices.drop(nTrain).toIndexedSeq)
+      } else {
+        (allIdx, allIdx)
+      }
+
+    val allCols = (0 until pLocal).toIndexedSeq
+    val covCols = (0 until covariates.cols).toIndexedSeq
+    val Xtrain = subMatrix(XVariants, trainIdx, allCols)
+    val Ytrain = subVector(Y, trainIdx)
+    val covTrain = subMatrix(covariates, trainIdx, covCols)
+    val Xtest = subMatrix(XVariants, testIdx, allCols)
+    val Ytest = subVector(Y, testIdx)
+    val covTest = subMatrix(covariates, testIdx, covCols)
+
+    val resolvedFamily = resolveFamily(Y, family)
+    val (selectionXTrain, selectionYTrain) =
+      resolvedFamily match {
+        case FamilyLinear => prepareLinearSelectionData(Xtrain, Ytrain, covTrain)
+        case FamilyLogistic => prepareLogisticSelectionData(Xtrain, Ytrain, covTrain, maxIterations, tolerance)
+      }
+
+    val p = XVariants.cols
+    val gram = selectionXTrain.t * selectionXTrain
+    val delta = 1.0 / math.log(math.max(2, effectivePGlobal))
     val (gramThresh, gramBias) = thresholdGram(gram, delta)
     val neighbor = gramThresh.map(x => x != 0.0)
     val cgAll = findAllCG(neighbor, nm)
-    val yTilde = X.t * Y
-    val defaultTau = math.sqrt(2 * math.log(p) * r)
-    val defaultSp  = math.pow(p.toDouble, 0.5)
-    val spPerturb = defaultSp * (1 + 0.1 * (if (Random.nextBoolean()) 1.0 else -1.0))
-    val tauPerturb = defaultTau * (1 + 0.1 * (if (Random.nextBoolean()) 1.0 else -1.0))
-    val (betaGS, nIter) = iterGS(yTilde, gramThresh, gramBias, cgAll, spPerturb, tauPerturb, nm)
-    println("beta: " + betaGS)
-    betaGS
+    val yTilde = selectionXTrain.t * selectionYTrain
+    val defaultTau = math.sqrt(2 * math.log(math.max(2, effectivePGlobal)) * r)
+    val spPerturb = effectiveSp * (1 + 0.1 * (if (rng.nextBoolean()) 1.0 else -1.0))
+    val tauPerturb = defaultTau * (1 + 0.1 * (if (rng.nextBoolean()) 1.0 else -1.0))
+    val tIterStart = System.nanoTime()
+    val (betaGS, _) = iterGS(
+      yTilde,
+      gramThresh,
+      gramBias,
+      cgAll,
+      effectivePGlobal,
+      spPerturb,
+      tauPerturb,
+      nm,
+      maxClusterSize = maxClusterSize,
+      approximateLargeClusters = approximateLargeClusters
+    )
+    val iterSec = (System.nanoTime() - tIterStart) / 1e9
+
+    val selected = which(betaGS.map(_ != 0.0))
+    println(s"[GS] executeSelectionAware: selected=${selected.length}, iterElapsedSec=$iterSec")
+    val refit =
+      resolvedFamily match {
+        case FamilyLinear => refitOlsAdjusted(Xtest, Ytest, covTest, selected)
+        case FamilyLogistic => refitLogisticAdjusted(Xtest, Ytest, covTest, selected, maxIterations, tolerance)
+      }
+
+    GSResult(
+      refit.beta,
+      refit.standardError,
+      refit.tStat,
+      refit.pValue,
+      selectedMask(pLocal, selected),
+      trainIdx.length,
+      testIdx.length
+    )
   }
+
+  /**
+   * Runs Graphlet Screening and returns selection-aware statistics by default.
+   */
+  def execute(XVariants: DenseMatrix[Double],
+              Y: DenseVector[Double],
+              covariates: DenseMatrix[Double],
+              family: String = FamilyAuto,
+              nm: Int = 3,
+              r: Double = 3.5,
+              selectionAware: Boolean = true,
+              splitFraction: Double = 0.5,
+              seed: Int = 1,
+              maxClusterSize: Int = 20,
+              sparsityLevel: Double = -1.0,
+              approximateLargeClusters: Boolean = false,
+              pGlobal: Int = -1,
+              maxIterations: Int = 25,
+              tolerance: Double = 1e-6): GSResult =
+    executeSelectionAware(
+      XVariants,
+      Y,
+      covariates,
+      family,
+      nm,
+      r,
+      selectionAware,
+      splitFraction,
+      seed,
+      maxClusterSize,
+      sparsityLevel,
+      approximateLargeClusters,
+      pGlobal,
+      maxIterations,
+      tolerance
+    )
 }
 case class GraphletScreening(
   yFields: Seq[String],
   xField: String,
   covFields: Seq[String],
   rowBlockSize: Int,
+  blockOverlap: Int,
   passThrough: Seq[String],
+  family: String,
+  mode: String,
+  selectionAware: Boolean,
+  splitFraction: Double,
+  seed: Int,
   nm: Int,
-  r: Double = 3.5,  // Add signal strength parameter with default
+  r: Double = 3.5,
+  maxClusterSize: Int = 20,
+  sparsityLevel: Double = -1.0,
+  maxIterations: Int = 25,
+  tolerance: Double = 1e-6,
 ) extends MatrixToTableFunction {
 
   override def typ(childType: MatrixType): TableType = {
     val passThroughType = TStruct(passThrough.map(f => f -> childType.rowType.field(f).typ): _*)
     val schema = TStruct(
       ("n", TInt32),
+      ("n_total", TInt32),
+      ("n_train", TInt32),
+      ("n_test", TInt32),
+      ("selected", TArray(TBoolean)),
       ("beta", TArray(TFloat64)),
+      ("standard_error", TArray(TFloat64)),
+      ("t_stat", TArray(TFloat64)),
+      ("p_value", TArray(TFloat64)),
     )
     TableType(
       childType.rowKeyStruct ++ passThroughType ++ schema,
@@ -737,128 +1234,339 @@ case class GraphletScreening(
   def preservesPartitionCounts: Boolean = true
 
   def execute(ctx: ExecuteContext, mv: MatrixValue): TableValue = {
-    // Extract y matrix and covariates similar to LinearRegression
     val (y, cov, completeColIdx) =
       RegressionUtils.getPhenosCovCompleteSamples(mv, yFields.toArray, covFields.toArray)
-    
-    val n = y.rows // n_complete_samples  
-    val nPhenotypes = y.cols // number of response variables
-    val k = cov.cols // nCovariates
-    
-    info(s"graphlet_screening: running on $n samples for ${nPhenotypes} response ${plural(nPhenotypes, "variable")} y,\n"
-      + s"    with input variable x, $k additional ${plural(k, "covariate")}, nm=$nm, r=$r...")
-    
-    // Get backend and broadcast needed data
+    val n = y.rows
+    val nPhenotypes = y.cols
+    val k = cov.cols
+
+    val normalizedMode = mode match {
+      case "global" | "block" => mode
+      case other => fatal(s"Unsupported graphlet screening mode '$other'. Expected 'global' or 'block'.")
+    }
+
+    info(
+      s"graphlet_screening: running in $normalizedMode mode on $n samples for ${nPhenotypes} response ${plural(nPhenotypes, "variable")} y,\n" +
+        s"    with input variable x, $k additional ${plural(k, "covariate")}, family=$family, selectionAware=$selectionAware, nm=$nm, r=$r, maxClusterSize=$maxClusterSize..."
+    )
+
     val backend = HailContext.backend
     val completeColIdxBc = backend.broadcast(completeColIdx)
     val yBc = backend.broadcast(y)
     val covBc = backend.broadcast(cov)
-    
-    // Get row and entry types for extracting x values
+
     val fullRowType = mv.rvd.rowPType
     val entryArrayType = MatrixType.getEntryArrayType(fullRowType)
     val entryType = entryArrayType.elementType.asInstanceOf[PStruct]
     assert(entryType.field(xField).typ.virtualType == TFloat64)
-    
+
     val entryArrayIdx = MatrixType.getEntriesIndex(fullRowType)
     val fieldIdx = entryType.fieldIdx(xField)
-    
+
     val tableType = typ(mv.typ)
     val rvdType = tableType.canonicalRVDType
     val copiedFieldIndices = (mv.typ.rowKey ++ passThrough).map(fullRowType.fieldIdx(_)).toArray
-    
+    val partitionCounts = mv.rvd.countPerPartition()
+    val partitionOffsets = new Array[Int](partitionCounts.length)
+    var runningOffset = 0
+    partitionCounts.zipWithIndex.foreach { case (count, idx) =>
+      if (count > Int.MaxValue)
+        fatal(s"Graphlet screening encountered a partition with $count rows, which exceeds the supported in-memory limit.")
+      partitionOffsets(idx) = runningOffset
+      runningOffset += count.toInt
+    }
+    val pGlobal = runningOffset
+    if (pGlobal == 0)
+      fatal("Graphlet screening requires at least one variant row.")
+
     val sm = ctx.stateManager
-    
-    // Process rows in blocks similar to LinearRegression
-    val newRVD = mv.rvd.mapPartitionsWithContext(rvdType) { (consumerCtx, it) =>
-      val producerCtx = consumerCtx.freshContext
-      val rvb = new RegionValueBuilder(sm)
-      
-      val missingCompleteCols = new IntArrayBuilder()
-      val data = new Array[Double](n * rowBlockSize)
-      
-      val blockWRVs = new Array[WritableRegionValue](rowBlockSize)
-      var i = 0
-      while (i < rowBlockSize) {
-        blockWRVs(i) = WritableRegionValue(sm, fullRowType, producerCtx.freshRegion())
-        i += 1
+
+    def emitResultRow(
+      rvb: RegionValueBuilder,
+      rowRegion: Region,
+      ptr: Long,
+      rowIdx: Int,
+      results: Array[GraphletRegression.GSResult]
+    ): Long = {
+      rvb.start(rvdType.rowType)
+      rvb.startStruct()
+      rvb.addFields(fullRowType, rowRegion, ptr, copiedFieldIndices)
+      rvb.addInt(n)
+      rvb.addInt(n)
+      rvb.addInt(results.head.nTrain)
+      rvb.addInt(results.head.nTest)
+
+      rvb.startArray(nPhenotypes)
+      var j = 0
+      while (j < nPhenotypes) {
+        rvb.addBoolean(results(j).selected(rowIdx))
+        j += 1
       }
-      
-      it(producerCtx).trueGroupedIterator(rowBlockSize)
-        .flatMap { git =>
-          var i = 0
-          while (git.hasNext) {
-            val ptr = git.next()
+      rvb.endArray()
+
+      rvb.startArray(nPhenotypes)
+      j = 0
+      while (j < nPhenotypes) {
+        rvb.addDouble(results(j).beta(rowIdx))
+        j += 1
+      }
+      rvb.endArray()
+
+      rvb.startArray(nPhenotypes)
+      j = 0
+      while (j < nPhenotypes) {
+        rvb.addDouble(results(j).standardError(rowIdx))
+        j += 1
+      }
+      rvb.endArray()
+
+      rvb.startArray(nPhenotypes)
+      j = 0
+      while (j < nPhenotypes) {
+        rvb.addDouble(results(j).tStat(rowIdx))
+        j += 1
+      }
+      rvb.endArray()
+
+      rvb.startArray(nPhenotypes)
+      j = 0
+      while (j < nPhenotypes) {
+        rvb.addDouble(results(j).pValue(rowIdx))
+        j += 1
+      }
+      rvb.endArray()
+
+      rvb.endStruct()
+      rvb.end()
+    }
+
+    val newRVD =
+      if (normalizedMode == "global") {
+        val rawXData = new Array[Double](n * pGlobal)
+        val missingCompleteCols = new IntArrayBuilder()
+        val enc = TypedCodecSpec(ctx, fullRowType, BufferSpec.wireSpec)
+        val encodedRows = mv.rvd.collectAsBytes(ctx, enc)
+        val (decodedRowPType: PStruct, dec) = enc.buildDecoder(ctx, mv.rvd.rowType)
+
+        ctx.r.pool.scopedRegion { region =>
+          var globalRowIdx = 0
+          RegionValue.fromBytes(ctx.theHailClassLoader, dec, region, encodedRows.iterator).foreach { ptr =>
             RegressionUtils.setMeanImputedDoubles(
-              data,
-              i * n,
-              completeColIdxBc.value,
+              rawXData,
+              globalRowIdx * n,
+              completeColIdx,
               missingCompleteCols,
               ptr,
-              fullRowType,
+              decodedRowPType,
               entryArrayType,
               entryType,
               entryArrayIdx,
-              fieldIdx
+              fieldIdx,
             )
-            blockWRVs(i).set(ptr, true)
-            producerCtx.region.clear()
-            i += 1
+            globalRowIdx += 1
+            region.clear()
           }
-          val blockLength = i
-          
-          // Build X matrix for this block of rows
-          val X = new DenseMatrix[Double](n, blockLength, data)
-          
-          // Add covariates to X if present
-          val XWithCov = if (k > 0) {
-            DenseMatrix.horzcat(X, covBc.value)
-          } else {
-            X
-          }
-          
-          // Process each phenotype and get beta coefficients
-          val betaResults = new Array[DenseVector[Double]](nPhenotypes)
-          for (phenoIdx <- 0 until nPhenotypes) {
-            val yVec = yBc.value(::, phenoIdx)
-            
-            // Call GraphletRegression for this phenotype
-            val beta = GraphletRegression.execute(XWithCov, yVec, nm, r)
-            
-            // Extract only the coefficients for genetic variants in this block (not covariates)
-            betaResults(phenoIdx) = beta(0 until blockLength)
-          }
-          
-          // Generate output rows
-          (0 until blockLength).iterator.map { i =>
-            val wrv = blockWRVs(i)
-            rvb.set(wrv.region)
-            rvb.start(rvdType.rowType)
-            rvb.startStruct()
-            
-            // Add row key and pass-through fields
-            rvb.addFields(fullRowType, wrv.region, wrv.offset, copiedFieldIndices)
-            
-            // Add n (number of samples)
-            rvb.addInt(n)
-            
-            // Add beta array for all phenotypes for this row
-            rvb.startArray(nPhenotypes)
-            var j = 0
-            while (j < nPhenotypes) {
-              rvb.addDouble(betaResults(j)(i))
-              j += 1
-            }
-            rvb.endArray()
-            
-            rvb.endStruct()
-            
-            producerCtx.region.addReferenceTo(wrv.region)
-            rvb.end()
+          if (globalRowIdx != pGlobal)
+            fatal(s"Graphlet screening expected $pGlobal rows in global mode but decoded $globalRowIdx.")
+        }
+
+        val rawX = new DenseMatrix[Double](n, pGlobal, rawXData)
+        val results = new Array[GraphletRegression.GSResult](nPhenotypes)
+        for (phenoIdx <- 0 until nPhenotypes) {
+          val yVec = y(::, phenoIdx)
+          results(phenoIdx) = GraphletRegression.execute(
+            rawX,
+            yVec,
+            cov,
+            family = family,
+            nm = nm,
+            r = r,
+            selectionAware = selectionAware,
+            splitFraction = splitFraction,
+            seed = seed + phenoIdx,
+            maxClusterSize = maxClusterSize,
+            sparsityLevel = sparsityLevel,
+            approximateLargeClusters = false,
+            pGlobal = pGlobal,
+            maxIterations = maxIterations,
+            tolerance = tolerance,
+          )
+        }
+
+        val resultsBc = backend.broadcast(results)
+        val partitionOffsetsBc = backend.broadcast(partitionOffsets)
+        mv.rvd.mapPartitionsWithContextAndIndex(rvdType) { (partIdx, partitionCtx, it) =>
+          val rvb = partitionCtx.rvb
+          val offset = partitionOffsetsBc.value(partIdx)
+          var localIdx = 0
+          it(partitionCtx).map { ptr =>
+            val out = emitResultRow(rvb, partitionCtx.r, ptr, offset + localIdx, resultsBc.value)
+            localIdx += 1
+            out
           }
         }
-    }
-    
+      } else {
+        mv.rvd.mapPartitionsWithContext(rvdType) { (consumerCtx, it) =>
+          val producerCtx = consumerCtx.freshContext
+          val rvb = new RegionValueBuilder(sm)
+          val overlap = blockOverlap
+          val missingCompleteCols = new IntArrayBuilder()
+          val maxWindowSize = math.max(1, rowBlockSize + 2 * overlap)
+          val data = new Array[Double](n * maxWindowSize)
+          val rowIt = it(producerCtx)
+          val rowBuffer = new mutable.ArrayBuffer[WritableRegionValue](maxWindowSize)
+
+          def appendNextRow(): Unit = {
+            val ptr = rowIt.next()
+            val wrv = WritableRegionValue(sm, fullRowType, producerCtx.freshRegion())
+            wrv.set(ptr, true)
+            rowBuffer += wrv
+            producerCtx.region.clear()
+          }
+
+          new Iterator[Long] {
+            private var initialized = false
+            private var currentResults: Array[GraphletRegression.GSResult] = null
+            private var currentWindowStart = 0
+            private var currentCoreLength = 0
+            private var currentCoreStartInBuffer = 0
+            private var emittedInCurrentBlock = 0
+            private var finished = false
+
+            private def initializeBuffer(): Unit = {
+              val initialTarget = rowBlockSize + overlap
+              while (rowBuffer.length < initialTarget && rowIt.hasNext)
+                appendNextRow()
+              initialized = true
+              if (rowBuffer.isEmpty)
+                finished = true
+            }
+
+            private def prepareNextBlock(): Boolean = {
+              if (!initialized)
+                initializeBuffer()
+              if (finished || rowBuffer.isEmpty)
+                return false
+
+              if (currentCoreStartInBuffer >= rowBuffer.length) {
+                finished = true
+                return false
+              }
+
+              val desiredCoreEnd = currentCoreStartInBuffer + rowBlockSize
+              val desiredWindowEnd = desiredCoreEnd + overlap
+              while (rowBuffer.length < desiredWindowEnd && rowIt.hasNext)
+                appendNextRow()
+
+              val coreAvailable = rowBuffer.length - currentCoreStartInBuffer
+              val coreLength = math.min(rowBlockSize, coreAvailable)
+              if (coreLength <= 0) {
+                finished = true
+                return false
+              }
+
+              val windowStart = math.max(0, currentCoreStartInBuffer - overlap)
+              val windowEnd = math.min(rowBuffer.length, desiredWindowEnd)
+              val windowLength = windowEnd - windowStart
+
+              var rowIdx = 0
+              while (rowIdx < windowLength) {
+                val wrv = rowBuffer(windowStart + rowIdx)
+                RegressionUtils.setMeanImputedDoubles(
+                  data,
+                  rowIdx * n,
+                  completeColIdxBc.value,
+                  missingCompleteCols,
+                  wrv.offset,
+                  fullRowType,
+                  entryArrayType,
+                  entryType,
+                  entryArrayIdx,
+                  fieldIdx,
+                )
+                rowIdx += 1
+              }
+
+              val rawX = new DenseMatrix[Double](n, windowLength, data)
+              val results = new Array[GraphletRegression.GSResult](nPhenotypes)
+              var phenoIdx = 0
+              while (phenoIdx < nPhenotypes) {
+                val yVec = yBc.value(::, phenoIdx)
+                results(phenoIdx) = GraphletRegression.execute(
+                  rawX,
+                  yVec,
+                  covBc.value,
+                  family = family,
+                  nm = nm,
+                  r = r,
+                  selectionAware = selectionAware,
+                  splitFraction = splitFraction,
+                  seed = seed + phenoIdx,
+                  maxClusterSize = maxClusterSize,
+                  sparsityLevel = sparsityLevel,
+                  approximateLargeClusters = true,
+                  pGlobal = pGlobal,
+                  maxIterations = maxIterations,
+                  tolerance = tolerance,
+                )
+                phenoIdx += 1
+              }
+
+              currentResults = results
+              currentWindowStart = currentCoreStartInBuffer - windowStart
+              currentCoreLength = coreLength
+              emittedInCurrentBlock = 0
+              true
+            }
+
+            private def advanceWindow(): Unit = {
+              val nextCoreStart = currentCoreStartInBuffer + currentCoreLength
+              if (nextCoreStart >= rowBuffer.length && !rowIt.hasNext) {
+                rowBuffer.foreach(_.region.clear())
+                rowBuffer.clear()
+                finished = true
+                currentResults = null
+                return
+              }
+
+              val dropCount = math.max(0, nextCoreStart - overlap)
+              var idx = 0
+              while (idx < dropCount) {
+                rowBuffer(idx).region.clear()
+                idx += 1
+              }
+              rowBuffer.remove(0, dropCount)
+              currentCoreStartInBuffer = nextCoreStart - dropCount
+              currentResults = null
+            }
+
+            override def hasNext: Boolean = {
+              if (finished)
+                return false
+              if (currentResults != null && emittedInCurrentBlock < currentCoreLength)
+                return true
+              if (currentResults != null)
+                advanceWindow()
+              if (finished)
+                false
+              else
+                prepareNextBlock()
+            }
+
+            override def next(): Long = {
+              if (!hasNext)
+                throw new java.util.NoSuchElementException("graphlet screening block iterator exhausted")
+
+              val windowIdx = currentWindowStart + emittedInCurrentBlock
+              emittedInCurrentBlock += 1
+              val wrv = rowBuffer(windowIdx)
+              rvb.set(wrv.region)
+              emitResultRow(rvb, wrv.region, wrv.offset, windowIdx, currentResults)
+            }
+          }
+        }
+      }
+
     TableValue(ctx, tableType, BroadcastRow.empty(ctx), newRVD)
   }
 }

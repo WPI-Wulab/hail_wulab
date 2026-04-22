@@ -409,7 +409,7 @@ def linear_regression_rows(y, x, covariates, block_size=16, pass_through=(), *, 
         fields = ['y_transpose_x', 'beta', 'standard_error', 't_stat', 'p_value']
         ht_result = ht_result.annotate(**{f: ht_result[f][0] for f in fields})
 
-    return ht_result.persist()
+    return ht_result
 
 
 @typecheck(
@@ -3310,12 +3310,41 @@ def ogfisher(key, pval, df, w, n_tests, genotype=None, corr=None, corr_idx=None,
     y=oneof(expr_float64, sequenceof(expr_float64)),
     x=expr_float64,
     covariates=sequenceof(expr_float64),
+    family=enumeration('auto', 'linear', 'logistic'),
+    mode=enumeration('global', 'block'),
+    selection_aware=bool,
+    split_fraction=float,
+    seed=int,
     nm=int,
     r=float,
     block_size=int,
+    block_overlap=int,
+    max_cluster_size=int,
+    sparsity_level=nullable(float),
+    max_iterations=int,
+    tolerance=float,
     pass_through=sequenceof(oneof(str, Expression)),
 )
-def graphlet_screening(mt, y, x, covariates, nm=3, r=3.5, block_size=16, pass_through=()) -> Table:
+def graphlet_screening(
+    mt,
+    y,
+    x,
+    covariates,
+    nm=3,
+    r=3.5,
+    block_size=16,
+    block_overlap=0,
+    max_cluster_size=20,
+    sparsity_level=None,
+    pass_through=(),
+    family='auto',
+    mode='global',
+    selection_aware=True,
+    split_fraction=0.5,
+    seed=1,
+    max_iterations=25,
+    tolerance=1e-6,
+) -> Table:
     """Perform graphlet screening regression on genetic data.
     
     Parameters
@@ -3328,12 +3357,39 @@ def graphlet_screening(mt, y, x, covariates, nm=3, r=3.5, block_size=16, pass_th
         Entry-indexed expression for input variable.
     covariates : :obj:`list` of :class:`.Float64Expression`
         List of column-indexed covariate expressions.
+    family : :obj:`str`
+        Response family for inference. ``'auto'`` uses logistic inference for 0/1 phenotypes and
+        linear inference otherwise.
+    mode : :obj:`str`
+        ``'global'`` runs one screening problem across all analyzed variants. ``'block'`` is a
+        scalable approximation that screens each block independently while using global threshold
+        calibration.
+    selection_aware : :obj:`bool`
+        If ``True``, use sample splitting for selection-aware refit statistics.
+    split_fraction : :obj:`float`
+        Fraction of samples assigned to the selection split when ``selection_aware`` is ``True``.
+    seed : :obj:`int`
+        Random seed for sample splitting and GS perturbations.
     nm : :obj:`int`
         Maximum subgraph size (default: 3).
     r : :obj:`float`
         Signal strength parameter (default: 3.5).
     block_size : :obj:`int`
         Number of row regressions to perform simultaneously per core (default: 16).
+    block_overlap : :obj:`int`
+        Number of neighboring rows to include on each side of each block in ``'block'`` mode.
+        Larger values better capture cross-block correlation at higher memory cost.
+    max_cluster_size : :obj:`int`
+        Maximum connected component size allowed in the GS cleaning step. Larger connected
+        components raise an error, matching the exact-cleaning behavior of the original R code
+        (default: 20).
+    sparsity_level : :obj:`float`, optional
+        Expected number of nonzero signals ``sp`` used to tune iterative GS, matching the
+        original R implementation. If omitted, defaults to ``p**0.5`` for backward compatibility.
+    max_iterations : :obj:`int`
+        Maximum number of iterations used by logistic refit internals.
+    tolerance : :obj:`float`
+        Convergence tolerance used by logistic refit internals.
     pass_through : :obj:`list` of :class:`str` or :class:`.Expression`
         Additional row fields to include in the resulting table.
         
@@ -3366,6 +3422,16 @@ def graphlet_screening(mt, y, x, covariates, nm=3, r=3.5, block_size=16, pass_th
         cov_dict[cov_field_name] = e
 
     _warn_if_no_intercept('graphlet_screening', covariates)
+    if max_cluster_size < 1:
+        raise ValueError("'graphlet_screening': 'max_cluster_size' must be at least 1")
+    if sparsity_level is not None and sparsity_level <= 0:
+        raise ValueError("'graphlet_screening': 'sparsity_level' must be positive when provided")
+    if block_overlap < 0:
+        raise ValueError("'graphlet_screening': 'block_overlap' must be non-negative")
+    if not 0.0 < split_fraction < 1.0 and selection_aware:
+        raise ValueError("'graphlet_screening': 'split_fraction' must be in (0, 1) when selection_aware is True")
+    if max_iterations < 1:
+        raise ValueError("'graphlet_screening': 'max_iterations' must be at least 1")
 
     x_field_name = Env.get_uid()
     row_fields = _get_regression_row_fields(mt, pass_through, 'graphlet_screening')
@@ -3383,22 +3449,40 @@ def graphlet_screening(mt, y, x, covariates, nm=3, r=3.5, block_size=16, pass_th
         'yFields': y_field_names,
         'xField': x_field_name,
         'covFields': cov_field_names,
+        'family': family,
+        'mode': mode,
+        'selectionAware': selection_aware,
+        'splitFraction': split_fraction,
+        'seed': seed,
         'rowBlockSize': block_size,
+        'blockOverlap': block_overlap,
         'passThrough': [x for x in row_fields if x not in mt.row_key],
         'nm': nm,
         'r': r,
+        'maxClusterSize': max_cluster_size,
+        'sparsityLevel': sparsity_level if sparsity_level is not None else -1.0,
+        'maxIterations': max_iterations,
+        'tolerance': tolerance,
     }
     
     ht_result = Table(ir.MatrixToTableApply(mt._mir, config))
+
+    # Some backends may not preserve row-key fields in graphlet output.
+    # Reattach the original matrix row keys by stable row index when needed.
+    row_key_fields = list(mt.row_key)
+    if row_key_fields and any(f not in ht_result.row for f in row_key_fields):
+        idx_field = Env.get_uid()
+        key_rows = mt.rows().select().key_by().add_index(idx_field)
+        ht_result = ht_result.key_by().add_index(idx_field)
+        ht_result = key_rows.key_by(idx_field).join(ht_result.key_by(idx_field), how='inner')
+        ht_result = ht_result.key_by(*row_key_fields).drop(idx_field)
     
-    # If y was a single value, unwrap the array
+    # If y was a single value, unwrap per-phenotype arrays while preserving keys.
     if not y_is_list:
-        original_keys = ht_result.key
-        ht_result = ht_result.key_by()
-        ht_result = ht_result.transmute(beta=ht_result.beta[0])
-        ht_result = ht_result.key_by(*original_keys)
+        fields = [f for f in ['selected', 'beta', 'standard_error', 't_stat', 'p_value'] if f in ht_result.row_value]
+        ht_result = ht_result.annotate(**{f: ht_result[f][0] for f in fields})
     
-    return ht_result.persist()
+    return ht_result
 
 
 @typecheck(p_value=expr_numeric, approximate=bool)

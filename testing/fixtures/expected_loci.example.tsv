@@ -1,0 +1,3 @@
+label	match_type	contig	position	window_bp	rsid	alleles	source	notes
+ExampleALSLead	window	chr21	26800000	250000	21-26800000-A-G	A/G	example-literature	Example schema row for a chr21 region-level truth set.
+ExampleExactSentinel	exact	chr21	14104569	0	21-14104569-C-T	C/T	example-literature	Example schema row for an exact sentinel variant.

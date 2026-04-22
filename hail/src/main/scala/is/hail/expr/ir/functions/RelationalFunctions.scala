@@ -8,7 +8,6 @@ import is.hail.methods.gfisher.{GFisher, OGFisher}
 import is.hail.types.{RTable, TypeWithRequiredness}
 import is.hail.types.virtual.{BlockMatrixType, MatrixType, TableType, Type}
 import is.hail.utils._
-import is.hail.methods.GraphletScreening._
 
 import org.json4s.{Extraction, JValue, ShortTypeHints}
 import org.json4s.jackson.JsonMethods

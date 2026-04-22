@@ -47,3 +47,4 @@ hail/python/hail/backend/extra_classpath
 hail/python/hail/backend/hail.jar
 hail/install-editable
 .helix
+.codex
