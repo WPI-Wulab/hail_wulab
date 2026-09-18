@@ -8,6 +8,19 @@
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
   * @author Peter Howell
   * Last update (latest update first):
+  *   Claude Code (Opus 5), prompted by VPanwar, 2026-09-09: optimalWeightsG now builds M with
+  *     cov2corZeroSafe. It is currently dead code (zero call sites), but the unguarded cov2cor
+  *     would put NaN into M, and optimalWeightsM propagates that to EVERY weight through
+  *     inv(I + v*M) -- R's Optimal_Weights_M rejects such an M outright, where the Scala has no
+  *     input check.
+  *   Claude Code (Opus 5), prompted by VPanwar, 2026-09-09: Fixed defect C1, found by the group-C
+  *     Z-score suite (packages/glow-core in the GLOWh repo). getH_Continuous and getH_Binary fit
+  *     the null model on an intercept-augmented design matrix but built HHalf from the
+  *     un-augmented X, so the projection removed a different subspace than the residuals were
+  *     taken from and every GHG -- and every weight derived from it -- was formed against a null
+  *     model that had not been fitted. Both now build one design matrix up front via nullDesign,
+  *     adding the intercept only if X does not already carry one, and use it for the fit and for
+  *     HHalf. Mirrors: GLOWr:::fit_null_model (GLOWr/R/getZ_marg_score.R).
   *   KHoar 2025-05-07: Added header to file
   */
 
@@ -44,7 +57,12 @@ object OptimalWeights {
       val GHG = G.t * G - GHalf * GHalf.t
       ((sqrt(diag(GHG)) *:* b) /:/ s0, GHG)
     }
-    val M = cov2cor(gHG)
+    // Guarded: a monomorphic variant gives a zero GHG diagonal entry, and an
+    // unguarded cov2cor would put NaN into M, which optimalWeightsM propagates
+    // to EVERY weight through inv(I + v*M). R's equivalent path takes M from
+    // getZ_marg_score, which guards, and Optimal_Weights_M additionally rejects
+    // an M containing NA outright.
+    val M = cov2corZeroSafe(gHG)
     return optimalWeightsM(g, bStar, pi, M, burden, forcePositiveWeights)
   }
 
@@ -149,22 +167,39 @@ object OptimalWeights {
     return (G.t * G - GHalf * GHalf.t, s0, resids)
   }
 
-  def getH_Continuous(X: BDM[Double], y: BDV[Double]): (BDM[Double], Double, BDV[Double]) = {
-    // compute solution to X * beta = y, manually calculate residuals
+  /** The null-model design matrix, mirroring R's fit_null_model
+    * (GLOWr/R/getZ_marg_score.R): the intercept column is added ONCE, up front,
+    * and only if X does not already carry one, so that the regression fit and
+    * the projection H_half are built from the SAME matrix.
+    *
+    * Getting this wrong is not cosmetic: fitting on [1 X] while forming H_half
+    * from X alone projects out a different subspace than the residuals were
+    * taken from, so GHG -- and every weight derived from it -- is computed
+    * against a null model that was never fitted.
+    */
+  def nullDesign(X: BDM[Double]): BDM[Double] = {
+    val hasIntercept = X.cols > 0 && (0 until X.rows).forall(i => X(i, 0) == 1.0)
+    if (hasIntercept) X else BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+  }
 
-    val yPred = lin_reg_predict(X, y, method="direct", addIntercept=true)
+  def getH_Continuous(X: BDM[Double], y: BDV[Double]): (BDM[Double], Double, BDV[Double]) = {
+    // compute solution to Xa * beta = y, manually calculate residuals
+    val Xa = nullDesign(X)
+
+    val yPred = lin_reg_predict(Xa, y, method="direct", addIntercept=false)
     val resids = y - yPred
 
     val sd = stddev(resids)
-    val HHalf = X * (cholesky(inv(X.t * X)))
+    val HHalf = Xa * (cholesky(inv(Xa.t * Xa)))
     return(HHalf, sd, resids)
   }
 
   def getH_Binary(X: BDM[Double], y: BDV[Double]): (BDM[Double], BDV[Double], BDV[Double]) = {
-    val y0 = log_reg_predict(X, y)
+    val Xa = nullDesign(X)
+    val y0 = log_reg_predict(Xa, y, addIntercept=false)
     val resids = y - y0
 
-    val XTilde = sqrt(y0 *:* (1.0-y0)) *:* X(::,*)
+    val XTilde = sqrt(y0 *:* (1.0-y0)) *:* Xa(::,*)
     val HHalf = XTilde * cholesky(inv(XTilde.t * XTilde))
 
     return (HHalf, y0, resids)

@@ -6,6 +6,16 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar
 Last update (latest update first):
+  Claude Code (Opus 5), prompted by VPanwar, 2026-09-09: Fixed three defects found by the group-B
+    golden-fixture suite (packages/glow-core in the GLOWh repo). (B1) calcu_SgZ_p had no all-zero
+    weight guard, so a degenerate weight vector reached pGFisherHyb and threw
+    NotConvergedException; R returns S = 0, p = 1. (B2) the GFisher p-value branch normalised the
+    weights but did not clamp the negatives first, which R does unconditionally there regardless of
+    is.posi.wts -- p.GFisher's moment matching is only defined for non-negative weights, and a
+    negative one produced another NotConvergedException. (B3) BSF_test_byP and BSF_cctP_test_byP
+    recovered Z from a two-sided p as qnorm(1 - p/2), which cancels in the tail (1.1e-08 relative
+    error at z = 6.5) and, because jdistlib's fourth argument is lower_tail, also returned the
+    negative root; now qnorm(p/2, lower.tail = FALSE), as in GLOWr::GLOW_Omni_byP.
   KHoar 2025-04-23: Added docstrings and internal comments
 */
 
@@ -130,9 +140,16 @@ object FuncCalcuCombTests {
       weights = BDV.fill(Zscores.size)(weights(0))  // You can use weights(0) or another logic to fill the vector
     }
 
-    // always scale the weights
+    // Always scale the weights. If every weight is zero the statistic is
+    // degenerate: there is nothing to combine, so S = 0 and p = 1 by definition.
+    // R returns here rather than dividing by zero (calcu_SgZ_p in GLOWr:
+    // "if (mean(abs(wts)) > 0) ... else return(list(S = 0, p = 1))"). Without
+    // this guard the all-zero weight vector reaches pGFisherHyb, whose
+    // eigendecomposition of the resulting degenerate matrix fails to converge.
     if (sum(abs(weights)) > 0) {
       weights = weights / sum(abs(weights))
+    } else {
+      return if (calc_p) Map("S" -> 0.0, "p" -> 1.0) else Map("S" -> 0.0)
     }
 
     // calculate the statistic S using the provided g function
@@ -159,6 +176,16 @@ object FuncCalcuCombTests {
         // set degrees of freedom to be a vector, not an integer
         val (numRows, numCols) = M.map(m => (m.rows, m.cols)).getOrElse((0, 0))
         val degreesOfFreedom = BDV.fill(numRows)(dfs)
+        // The GFisher p-value requires non-negative weights REGARDLESS of
+        // isPosiWts: p.GFisher's moment matching is derived for a non-negative
+        // combination, and a negative weight makes the approximated
+        // distribution invalid (here, an eigendecomposition that fails to
+        // converge). R clamps unconditionally at this point -- calcu_SgZ_p in
+        // GLOWr does "wts <- pmax(wts, 0); wts <- wts/sum(abs(wts))" inside this
+        // branch -- and the docstring above says so: "calc_p=TRUE for GFisher
+        // test will force the weights to be non-negative and then normalized".
+        // isPosiWts therefore governs only the statistic S, not the p-value.
+        weights = weights.map(x => math.max(x, 0))
         // rescale the weights
         weights = weights/sum(weights.map(math.abs))
         // recalculate the S to be consistent with the new weights
@@ -408,7 +435,14 @@ object FuncCalcuCombTests {
     Bstar: BDV[Double],
     PI: BDV[Double]
   ): Map[String, BDM[Double]] = {
-    val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
+    // Recover Z from a two-sided p-value on the UPPER tail: qnorm(p/2, lower.tail
+    // = FALSE), which is what R does (GLOWr::GLOW_Omni_byP). Subtracting from 1
+    // first cancels catastrophically for small p -- the round-trip relative error
+    // in the recovered Z is 2.1e-11 at z = 5.5 and 1.1e-08 at z = 6.5, i.e. worst
+    // exactly in the genome-wide significant tail -- and, because jdistlib's
+    // fourth argument is lower_tail, quantile(1 - p/2, ..., false, ...) also
+    // returns the NEGATIVE root, flipping the sign of every recovered Z.
+    val Zscores = Pvalues.map(p => Normal.quantile(p / 2.0, 0.0, 1.0, false, false)) *:* Zsigns
     BSF_test(Zscores, M, Bstar, PI)
   }
 
@@ -493,7 +527,14 @@ object FuncCalcuCombTests {
     Bstar: BDV[Double],
     PI: BDV[Double]
   ): Map[String, BDM[Double]] = {
-    val Zscores = Pvalues.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
+    // Recover Z from a two-sided p-value on the UPPER tail: qnorm(p/2, lower.tail
+    // = FALSE), which is what R does (GLOWr::GLOW_Omni_byP). Subtracting from 1
+    // first cancels catastrophically for small p -- the round-trip relative error
+    // in the recovered Z is 2.1e-11 at z = 5.5 and 1.1e-08 at z = 6.5, i.e. worst
+    // exactly in the genome-wide significant tail -- and, because jdistlib's
+    // fourth argument is lower_tail, quantile(1 - p/2, ..., false, ...) also
+    // returns the NEGATIVE root, flipping the sign of every recovered Z.
+    val Zscores = Pvalues.map(p => Normal.quantile(p / 2.0, 0.0, 1.0, false, false)) *:* Zsigns
     BSF_cctP_test(Zscores, M, Bstar, PI)
   }
 }

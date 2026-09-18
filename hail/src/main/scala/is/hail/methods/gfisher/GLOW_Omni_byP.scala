@@ -5,6 +5,12 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar
 Last update (latest update first):
+  Claude Code (Opus 5), prompted by VPanwar, 2026-09-09: Fixed the third copy of defect B3 -- Z was
+    recovered from a two-sided p-value as qnorm(1 - p/2), which cancels in the tail AND returns the
+    negative root, so every Burden statistic came out sign-flipped. Found by the group-E fixtures
+    (packages/glow-core in the GLOWh repo), which compare STAT and not only PVAL; the two-sided
+    p-values that dominate the other rows are insensitive to the sign, which is why B3's earlier
+    fixtures never showed it. Mirrors: GLOWr::GLOW_Omni_byP.
   KHoar 2025-04-23: Added comments and docstrings
 */
 
@@ -50,7 +56,14 @@ object GLOW_Omni_byP {
             if (Effects.isEmpty) throw new IllegalArgumentException("Effect is required to get signs of Z scores for burden test")
             val Zsigns = signum(Effects.get)
             val PvaluesVec = Pvalues.getOrElse(throw new IllegalArgumentException("Pvalues is None"))
-            PvaluesVec.map(p => Normal.quantile(1.0 - (p / 2.0), 0.0, 1.0, false, false)) *:* Zsigns
+            // Upper tail: qnorm(p/2, lower.tail = FALSE), as GLOWr::GLOW_Omni_byP
+            // does. This is the third copy of the expression corrected as defect
+            // B3 in Func_Calcu_Comb_Tests.scala on 2026-09-09; `1 - p/2` both
+            // cancels in the tail (1.1e-08 relative at z = 6.5) and, because
+            // jdistlib's fourth argument is lower_tail, returns the NEGATIVE
+            // root -- which flipped the sign of every recovered Z and so of every
+            // Burden statistic built from it.
+            PvaluesVec.map(p => Normal.quantile(p / 2.0, 0.0, 1.0, false, false)) *:* Zsigns
         }
 
         // Ensure final Z-scores are in vector form.

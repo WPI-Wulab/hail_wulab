@@ -6,6 +6,51 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar and Peter Howell
 Last update (latest update first):
+  Claude Code (Opus 5), prompted by VPanwar, 2026-09-15: Ported Saddle_Prob_fast, on ZWu's decision
+    that GLOWr's output is the target -- GLOWr calls SPAtest with method = "fastSPA", which keeps
+    the exact CGF only for subjects with a non-zero RAW genotype and replaces the whole excluded
+    block with N(NAmu, NAsigma). Implemented by PARAMETERISING the existing Korg, K1_adj, K2,
+    getRootK1, getSaddleProb and SaddleProb rather than adding six _fast duplicates: SPAtest's two
+    variants are the same functions under naMu = naSigma = 0 with a retained set of everything, and
+    that reduction is asserted as a bit-for-bit identity in SPAGroupCSpec. SaddleProb takes one new
+    argument, naSet, from which NAmu and NAsigma are derived as "the whole statistic minus the part
+    kept exactly", as Saddle_Prob_fast does. Measured on the group-C fixtures: 12 fast-path rows
+    improved, 0 regressed, worst per case 3.1e-04 -> 4.5e-06 (balanced), 1.2e-02 -> 6.0e-05
+    (extreme), 1.3e-04 -> 9.2e-06 (rare); the plain-branch row is unchanged to the last digit, as
+    predicted. What remains is the root-finder's absolute stopping rule, which is shared with
+    SPAtest and cannot be closed from this side.
+    Mirrors: SPAtest's Saddle_Prob_fast, Korg_fast, K1_adj_fast, K2_fast, getroot_K1_fast and
+    Get_Saddle_Prob_fast.
+  Claude Code (Opus 5), prompted by VPanwar, 2026-09-15: Step 1 of matching GLOWr's SPA output --
+    added the per-variant allele flip and the fast/plain dispatch that SPAtest's TestSPA and
+    TestSPAfast both begin with, and exposed the decision as "fast_path". Changes NO p-value today:
+    the flip is provably inert for the plain path (residualizing is linear and the constant vector
+    lies in X1's span, so 2 - G residualizes to -Gscale and q to -q, under which the saddlepoint
+    reflects and the two tails swap), verified against SPAtest where p(G) and p(2-G) are
+    bit-identical. Its real effect is the zero COUNT, which selects the branch -- measured 8.2% ->
+    53.0% zeros on an AF = 0.72 variant. Saddle_Prob_fast is not ported yet, so both branches still
+    run the plain path; the dispatch is pinned now so that porting it is one moving part against a
+    green baseline. Measured consequence: of the three failing black-box rows, binary_balanced[8]
+    takes the PLAIN branch (45.6% zeros) so its 1.1e-06 is stopping-rule only, while binary_rare[1]
+    and binary_extreme[0] (98.8% and 99.2% zeros) take the FAST branch and carry the estimator
+    mismatch as well. 29 of 33 binary fixture variants take the fast path.
+    Mirrors: SPAtest's TestSPA and TestSPAfast.
+  Claude Code (Opus 5), prompted by VPanwar, 2026-09-09: Applied the zero-variance guard at every
+    site that divides by the GHG diagonal -- five M_Z constructions and four Z-score divisions --
+    using package.scala's cov2corZeroSafe and zScoresZeroSafe. getZ_marg_score_binary_SPA gets its
+    own guard rather than that one, because R guards it by a DIFFERENT rule: an excluded variant is
+    one whose adjusted variance is non-finite or below 1e-08 times the MEDIAN positive variance (a
+    relative threshold, not machine epsilon), and R reports those as NA rather than neutralising
+    them. Inert on every existing fixture, which contain no degenerate variant; verified that the
+    SPA outputs are bit-identical to the pre-guard run. Mirrors: GLOWr's getZ_marg_score and
+    getZ_marg_score_binary_SPA.
+  Claude Code (Opus 5), prompted by VPanwar, 2026-09-09: Fixed defect C2, found by the group-C SPA
+    suite (packages/glow-core in the GLOWh repo). getRootK1's default convergence tolerance was
+    pow(Double.MinPositiveValue, 0.25); Double.MinPositiveValue is the smallest SUBNORMAL double
+    (4.9e-324), not machine epsilon, so the tolerance was ~1.5e-81 and the stopping test
+    abs(tnew - t) < tol could never fire -- the Newton loop ran to maxIter and reported
+    non-convergence on inputs that converge in a few iterations. Now pow(ulp(1.0), 0.25) ~ 1.22e-04,
+    mirroring SPAtest's getroot_K1 default of .Machine$double.eps^0.25.
   KHoar 2025-04-23: Re-formatted docstrings
   KHoar 2025-04-21: Added comments to SPA-related functions
 */
@@ -16,7 +61,7 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
 import breeze.numerics._
 import scala.collection.mutable.ArrayBuffer
 import net.sourceforge.jdistlib.{Normal, ChiSquare}
-import is.hail.methods.gfisher.OptimalWeights.{getGHG_Binary, getGHG_Binary2, getGHG_Continuous}
+import is.hail.methods.gfisher.OptimalWeights.{getGHG_Binary, getGHG_Binary2, getGHG_Continuous, nullDesign}
 import scala.util.control.Breaks._
 
 object FuncCalcuZScores {
@@ -81,13 +126,25 @@ object FuncCalcuZScores {
     *
     * @return    Vector of CGF values evaluated at each t_i
     */
-  def Korg(t: BDV[Double], mu: BDV[Double], g: BDV[Double]): BDV[Double] = {
+  def Korg(
+    t: BDV[Double], mu: BDV[Double], g: BDV[Double],
+    muNB: Option[BDV[Double]] = None, gNB: Option[BDV[Double]] = None,
+    naMu: Double = 0.0, naSigma: Double = 0.0
+  ): BDV[Double] = {
+    // fastSPA keeps the exact CGF only for the retained (non-zero genotype)
+    // subjects and replaces the whole excluded block with a GAUSSIAN CGF matched
+    // on its mean and variance -- hence naMu and naSigma. With the defaults
+    // (retained = everything, naMu = naSigma = 0) the extra terms vanish
+    // identically and this is the plain function, bit for bit: SPAtest's plain
+    // and _fast variants are the same function under that substitution.
+    val mu_ = muNB.getOrElse(mu)
+    val g_ = gNB.getOrElse(g)
     val out = BDV.zeros[Double](t.size)
 
     for (i <- 0 until t.size) {
       val t1 = t(i)
-      val temp = (1.0 - mu) + (mu * exp(g *:* t1))
-      out(i) = sum(log(temp))
+      val temp = (1.0 - mu_) + (mu_ * exp(g_ *:* t1))
+      out(i) = sum(log(temp)) + naMu * t1 + 0.5 * naSigma * t1 * t1
     }
 
     out
@@ -103,16 +160,28 @@ object FuncCalcuZScores {
     *
     * @return   Vector where each element corresponds to the adjusted K1 value for the corresponding t(i)
     */
-  def K1_adj(t: BDV[Double], mu: BDV[Double], g: BDV[Double], q: Double): BDV[Double] = {
+  def K1_adj(
+    t: BDV[Double], mu: BDV[Double], g: BDV[Double], q: Double,
+    muNB: Option[BDV[Double]] = None, gNB: Option[BDV[Double]] = None,
+    naMu: Double = 0.0, naSigma: Double = 0.0
+  ): BDV[Double] = {
+    // fastSPA keeps the exact CGF only for the retained (non-zero genotype)
+    // subjects and replaces the whole excluded block with a GAUSSIAN CGF matched
+    // on its mean and variance -- hence naMu and naSigma. With the defaults
+    // (retained = everything, naMu = naSigma = 0) the extra terms vanish
+    // identically and this is the plain function, bit for bit: SPAtest's plain
+    // and _fast variants are the same function under that substitution.
+    val mu_ = muNB.getOrElse(mu)
+    val g_ = gNB.getOrElse(g)
     val out = BDV.zeros[Double](t.size)
 
     for (i <- 0 until t.size) {
       val t1 = t(i)
-      val temp1 = (1.0 - mu) * exp(-g *:* t1) + mu
-      val temp2 = mu * g
+      val temp1 = (1.0 - mu_) * exp(-g_ *:* t1) + mu_
+      val temp2 = mu_ * g_
       // The saddlepoint function: sum(mu * g / ((1 - mu) * exp(-g * t1) + mu)) - q
       // This is the equation to solve for the saddlepoint (i.e., K1(t) = q)
-      out(i) = sum(temp2 / temp1) -:- q
+      out(i) = sum(temp2 / temp1) + naMu + naSigma * t1 - q
     }
 
     out
@@ -128,7 +197,19 @@ object FuncCalcuZScores {
     *
     * @return   Vector where each element is K2(t_i)
     */
-  def K2(t: BDV[Double], mu: BDV[Double], g: BDV[Double]): BDV[Double] = {
+  def K2(
+    t: BDV[Double], mu: BDV[Double], g: BDV[Double],
+    muNB: Option[BDV[Double]] = None, gNB: Option[BDV[Double]] = None,
+    naMu: Double = 0.0, naSigma: Double = 0.0
+  ): BDV[Double] = {
+    // fastSPA keeps the exact CGF only for the retained (non-zero genotype)
+    // subjects and replaces the whole excluded block with a GAUSSIAN CGF matched
+    // on its mean and variance -- hence naMu and naSigma. With the defaults
+    // (retained = everything, naMu = naSigma = 0) the extra terms vanish
+    // identically and this is the plain function, bit for bit: SPAtest's plain
+    // and _fast variants are the same function under that substitution.
+    val mu_ = muNB.getOrElse(mu)
+    val g_ = gNB.getOrElse(g)
     val out = BDV.zeros[Double](t.size)
 
     for (i <- 0 until t.size) {
@@ -136,15 +217,15 @@ object FuncCalcuZScores {
 
       // Compute the denominator of the expression: 
       // ((1 - mu) * exp(-g * t1) + mu)^2
-      val temp1 = pow(((1.0 - mu) * exp(-g *:* t1) + mu), 2)
+      val temp1 = pow(((1.0 - mu_) * exp(-g_ *:* t1) + mu_), 2)
 
       // Compute the numerator: 
       // (1 - mu) * mu * g^2 * exp(-g * t1)
-      val temp2 = (1.0 - mu) * mu * pow(g, 2) * exp(-g *:* t1)
+      val temp2 = (1.0 - mu_) * mu_ * pow(g_, 2) * exp(-g_ *:* t1)
 
       // The second derivative of the CGF:
       // K2(t1) = sum( numerator / denominator )
-      out(i) = sum(temp2 / temp1)
+      out(i) = sum(temp2 / temp1) + naSigma
     }
 
     out
@@ -384,8 +465,10 @@ object FuncCalcuZScores {
     * @param mu       Vector of mean parameters or location parameters used in the cumulant-generating function
     * @param g        Vector of weights or transformation coefficients applied in the cumulant-generating function
     * @param q        Target value (typically a linear constraint or statistic) that the saddlepoint approximation is solving for
-    * @param tol      (optional, default = pow(scala.Double.MinPositiveValue, 0.25)), Tolerance for convergence; the root
-                      is considered found if the step size is smaller than this
+    * @param tol      (optional, default = pow(ulp(1.0), 0.25) ~ 1.22e-04, mirroring SPAtest's
+                      getroot_K1, whose default is .Machine$double.eps^0.25), Tolerance for
+                      convergence; the root is considered found if the step size is smaller than
+                      this. NOTE this is an ABSOLUTE criterion on the Newton step.
     * @param maxIter  (optional, default = 1000), Maximum number of iterations to perform before declaring non-convergence
     *
     * @return         (Double, Int, Boolean) Double: estimated root t (may be pos infinity if q is out of bounds or Null if
@@ -398,8 +481,21 @@ object FuncCalcuZScores {
       mu: BDV[Double],
       g: BDV[Double],
       q: Double,
-      tol: Double = pow(scala.Double.MinPositiveValue, 0.25),
-      maxIter: Int = 1000
+      // R's .Machine$double.eps^0.25. math.ulp(1.0) is machine epsilon (2.22e-16);
+      // Double.MinPositiveValue, used here previously, is the smallest SUBNORMAL
+      // (4.9e-324), giving a tolerance of ~1.5e-81 that a double-precision Newton
+      // step can never reach -- so the loop ran to maxIter and reported failure to
+      // converge on inputs that converge in a handful of iterations.
+      tol: Double = pow(math.ulp(1.0), 0.25),
+      maxIter: Int = 1000,
+      // fastSPA's excluded block; the defaults reduce this to the plain Newton.
+      // Note the support check below uses the FULL g, as SPAtest's
+      // getroot_K1_fast does -- the bracket is a property of the whole statistic,
+      // not of the retained subset.
+      muNB: Option[BDV[Double]] = None,
+      gNB: Option[BDV[Double]] = None,
+      naMu: Double = 0.0,
+      naSigma: Double = 0.0
   ): (Double, Int, Boolean) = {
 
     val gPos = sum(g(g >:> 0.0))  // Sum of positive values in g
@@ -410,13 +506,13 @@ object FuncCalcuZScores {
       (Double.PositiveInfinity, 0, true)
     } else {
       var t = init                                    // Starting guess for root-finding
-      var K1Eval = K1_adj(BDV(t), mu, g, q).apply(0)  // Evaluate K1 at t
+      var K1Eval = K1_adj(BDV(t), mu, g, q, muNB, gNB, naMu, naSigma).apply(0)  // Evaluate K1 at t
       var prevJump = Double.PositiveInfinity          // Used to limit oscillations
       var iter = 1
 
       // Begin Newton-Raphson iterations, capped by maxIter
       while (iter <= maxIter) {
-        val K2Eval = K2(BDV(t), mu, g).apply(0)       // Derivative of K1 (2nd cumulant)
+        val K2Eval = K2(BDV(t), mu, g, muNB, gNB, naMu, naSigma).apply(0)  // Derivative of K1 (2nd cumulant)
         val tNew = t - K1Eval / K2Eval                // Newton-Raphson update
 
         // Return if update diverged
@@ -430,14 +526,14 @@ object FuncCalcuZScores {
         }
 
         // Evaluate K1 at new point
-        val newK1 = K1_adj(BDV(tNew), mu, g, q).apply(0)
+        val newK1 = K1_adj(BDV(tNew), mu, g, q, muNB, gNB, naMu, naSigma).apply(0)
 
         // Check for sign change, indicating crossing the root
         if (math.signum(K1Eval) != math.signum(newK1)) {
           if (math.abs(tNew - t) > prevJump - tol) {
             t = t + math.signum(newK1 - K1Eval) * prevJump / 2  // Backtrack slightly
             prevJump /= 2
-            K1Eval = K1_adj(BDV(t), mu, g, q).apply(0)          // Re-evaluate K1
+            K1Eval = K1_adj(BDV(t), mu, g, q, muNB, gNB, naMu, naSigma).apply(0)  // Re-evaluate K1
           } else {
             prevJump = math.abs(tNew - t)                       // Accept jump
             t = tNew
@@ -467,10 +563,16 @@ object FuncCalcuZScores {
     *
     * @return      Saddelpoint approximation of a p-value
     */
-  def getSaddleProb(zeta: Double, mu: BDV[Double], g: BDV[Double], q: Double, logP: Boolean = false): Double = {
+  def getSaddleProb(
+    zeta: Double, mu: BDV[Double], g: BDV[Double], q: Double, logP: Boolean = false,
+    muNB: Option[BDV[Double]] = None, gNB: Option[BDV[Double]] = None,
+    naMu: Double = 0.0, naSigma: Double = 0.0
+  ): Double = {
+    // The r* formula is identical in SPAtest's plain and _fast variants; only the
+    // K1/K2 they call differ, which is exactly what these arguments select.
     // Compute K1 (cumulant generating function) and K2 (its second derivative) at zeta
-    val k1 = Korg(BDV(zeta), mu, g)(0)
-    val k2 = K2(BDV(zeta), mu, g)(0)
+    val k1 = Korg(BDV(zeta), mu, g, muNB, gNB, naMu, naSigma)(0)
+    val k2 = K2(BDV(zeta), mu, g, muNB, gNB, naMu, naSigma)(0)
 
     if (java.lang.Double.isFinite(k1) && java.lang.Double.isFinite(k2)) {
       val temp1 = zeta * q - k1               // exponent part of the saddlepoint approximation
@@ -516,9 +618,37 @@ object FuncCalcuZScores {
     *
     *                    If the p-value is small and requires further adjustment, the function will recursively call itself.
     */
-  def SaddleProb(q: Double, mu: BDV[Double], g: BDV[Double], Cutoff: Any = 2.0, alpha: Double, output: String = "P", nodesFixed: Option[BDV[Double]], nodesInit: Option[BDV[Double]], logP: Boolean = false): Map[String, Any] = {
+  def SaddleProb(q: Double, mu: BDV[Double], g: BDV[Double], Cutoff: Any = 2.0, alpha: Double, output: String = "P", nodesFixed: Option[BDV[Double]], nodesInit: Option[BDV[Double]], logP: Boolean = false, naSet: Option[IndexedSeq[Int]] = None): Map[String, Any] = {
     val m1 = mu.dot(g)  // sum(mu * g)  // Expected value of the test statistic
     val var1 = (mu.toArray zip g.toArray).map { case (m, gi) => m * (1 - m) * gi * gi }.sum  // Variance
+
+    // fastSPA. `naSet` holds the indices whose RAW genotype is zero. Given it,
+    // the exact CGF is kept only for the complement and the excluded block is
+    // replaced by a Gaussian matched on its mean and variance:
+    //
+    //   NAmu    = m1   - sum(gNB * muNB)
+    //   NAsigma = var1 - sum(muNB * (1 - muNB) * gNB^2)
+    //
+    // i.e. "the whole statistic minus the part being kept exactly", which is how
+    // SPAtest's Saddle_Prob_fast computes them. With naSet = None the retained
+    // set is everything, both quantities are zero, and every formula below
+    // reduces to the plain saddlepoint -- the case this function has always
+    // computed. Mirrors: SPAtest's Saddle_Prob and Saddle_Prob_fast.
+    val keep: Option[IndexedSeq[Int]] = naSet.map { na =>
+      val isNA = Array.fill(g.length)(false)
+      na.foreach(i => isNA(i) = true)
+      (0 until g.length).filterNot(isNA)
+    }
+    val muNB: Option[BDV[Double]] = keep.map(k => BDV(k.map(mu(_)).toArray))
+    val gNB: Option[BDV[Double]] = keep.map(k => BDV(k.map(g(_)).toArray))
+    val naMu: Double = keep match {
+      case None => 0.0
+      case Some(k) => m1 - k.map(i => g(i) * mu(i)).sum
+    }
+    val naSigma: Double = keep match {
+      case None => 0.0
+      case Some(k) => var1 - k.map(i => mu(i) * (1.0 - mu(i)) * g(i) * g(i)).sum
+    }
     
     // Initialize optional p-values and spline node vector
     var p1: Option[Double] = None
@@ -572,19 +702,19 @@ object FuncCalcuZScores {
     } 
     // Otherwise, compute saddlepoint-adjusted p-values using roots of K1
     else {
-      val outUni1 = getRootK1(0, mu, g, q)
-      val outUni2 = getRootK1(0, mu, g, qinv)
+      val outUni1 = getRootK1(0, mu, g, q, pow(math.ulp(1.0), 0.25), 1000, muNB, gNB, naMu, naSigma)
+      val outUni2 = getRootK1(0, mu, g, qinv, pow(math.ulp(1.0), 0.25), 1000, muNB, gNB, naMu, naSigma)
 
       if (outUni1._3 && outUni2._3) {
         p1 = try {
-          Some(getSaddleProb(outUni1._1, mu, g, q, logP))
+          Some(getSaddleProb(outUni1._1, mu, g, q, logP, muNB, gNB, naMu, naSigma))
         } catch {
           case e: Exception =>
             if (logP) Some(pvalNoadj - Math.log(2))
             else Some(pvalNoadj / 2)
         }
         p2 = try {
-          Some(getSaddleProb(outUni2._1, mu, g, qinv, logP))
+          Some(getSaddleProb(outUni2._1, mu, g, qinv, logP, muNB, gNB, naMu, naSigma))
         } catch {
           case e: Exception =>
             if (logP) Some(pvalNoadj - Math.log(2))
@@ -606,7 +736,7 @@ object FuncCalcuZScores {
 
     // Recursively call if the p-value is small and needs further adjustment
     if (pval != 0 && pvalNoadj / pval > Math.pow(10, 3)) {
-      return SaddleProb(q, mu, g, cutoffVal * 2, alpha, output, nodesFixed, nodesInit, logP)
+      return SaddleProb(q, mu, g, cutoffVal * 2, alpha, output, nodesFixed, nodesInit, logP, naSet)
     } else {
       if (output == "metaspline") {
         Map("p.value" -> pval, "p.value.NA" -> pvalNoadj, "Is.converge" -> isConverge, "Score" -> score, "splfun" -> Get_Saddle_Spline(mu, g, nodes), "var" -> var1)
@@ -649,12 +779,12 @@ object FuncCalcuZScores {
       val (ghg, _, resids) = getGHG_Binary2(G, X, Y)
 
       val score = G.t * resids
-      val Zscore = score /:/ sqrt(diag(ghg))
+      val Zscore = zScoresZeroSafe(score, ghg)
 
       return Map(
         "Zscores" -> Zscore,
         "scores" -> score,
-        "M_Z" -> cov2cor(ghg),
+        "M_Z" -> cov2corZeroSafe(ghg),
         "M_s" -> ghg,
         // s0 = 1 for binary trait
         "s0" -> 1.0
@@ -667,17 +797,20 @@ object FuncCalcuZScores {
       val score = G.t * resids / s0
 
       val Zscore: BDV[Double] = if (use_lm_t) {
-        val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+        // nullDesign, not an unconditional horzcat: X may already carry an
+        // intercept column (R's fit_null_model returns it that way), and adding
+        // a second one makes the design matrix singular.
+        val XWithIntercept = nullDesign(X)
         BDV((0 until G.cols).map { j => contZScore(G(::, j), XWithIntercept, Y) }.toArray)
       } else {
         // Z scores based on the score statistics
-        score /:/ sqrt(diag(ghg))
+        zScoresZeroSafe(score, ghg)
       }
 
       return Map(
         "Zscores" -> Zscore,
         "scores" -> score,
-        "M_Z" -> cov2cor(ghg),
+        "M_Z" -> cov2corZeroSafe(ghg),
         "M_s" -> ghg,
         "s0" -> s0
       )
@@ -705,11 +838,14 @@ object FuncCalcuZScores {
     X: BDM[Double],
     Y: BDV[Double]
   ): Map[String, Any] = {
-    // Logistic regression model
-    val X1 = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+    // Logistic regression model. One design matrix, built once and used for the
+    // fit, for the projection XXVX_inv and for Hhalf below -- R's fit_null_model
+    // does the same. X may already carry an intercept, in which case appending
+    // another makes X1 singular.
+    val X1 = nullDesign(X)
 
     // Compute the predicted probabilities under the null model via logistic regression
-    val Y0 = log_reg_predict(X, Y)
+    val Y0 = log_reg_predict(X1, Y, addIntercept = false)
 
     // Computes the variance for each sample (Bernoulli variance formula)
     val Y0_vec = Y0 *:* (1.0 - Y0)
@@ -724,9 +860,55 @@ object FuncCalcuZScores {
     // Compute score statistic for each variant
     val score = Gscale.t * Y
 
-    // Applies the saddlepoint approximation to compute p-values for each score statistic
+    // Per-variant allele flip and sparse/dense dispatch, mirroring SPAtest's
+    // TestSPA and TestSPAfast, which BOTH begin:
+    //
+    //   n.g <- sum(G); if (n.g / (2 * length(G)) > 0.5) G <- 2 - G
+    //   NAset <- which(G == 0)
+    //   if (length(NAset) / length(G) < 0.5)  Saddle_Prob(...)   # dense
+    //   else                                  Saddle_Prob_fast(...)  # sparse
+    //
+    // Two things to know about the flip:
+    //
+    //  - It does NOT change the plain saddlepoint p-value. Residualizing is
+    //    linear and the constant vector lies in X1's span (X1 has an intercept),
+    //    so the residual of 2 - G is exactly -Gscale, and q becomes -q. Under
+    //    (g, q) -> (-g, -q) the saddlepoint reflects to -zeta, w and v both
+    //    negate, and the two tails swap -- leaving |p1| + |p2| unchanged.
+    //    Verified against SPAtest: p(G) and p(2-G) are bit-identical.
+    //  - Its real purpose is the ZERO COUNT, which decides the branch. Flipping
+    //    a variant whose counted allele is the major one turns a mostly-non-zero
+    //    vector into a mostly-zero one -- measured 8.2% zeros -> 53.0% on a
+    //    typical AF = 0.72 variant, which crosses the 50% threshold.
+    //
+    // So the flip is inert today and becomes load-bearing when Saddle_Prob_fast
+    // is ported. It is implemented now because the dispatch cannot be correct
+    // without it.
+    val nSamp = G.rows.toDouble
+    val useFastPath = BDV.zeros[Double](score.size)   // 1.0 where SPAtest would use fastSPA
+
     val pval_spa = BDV((0 until score.size).map { x =>
-      SaddleProb(score(x), Y0, Gscale(::, x), "BE", 5 * math.pow(10, -8), "P", None, None, false)("p.value").asInstanceOf[Double]
+      val gRaw = G(::, x)
+      val flip = sum(gRaw) / (2.0 * nSamp) > 0.5
+      // NAset is computed on the RAW genotype, after the flip and before
+      // residualizing -- not on Gscale, whose entries are almost never zero.
+      val gForMask = if (flip) 2.0 - gRaw else gRaw
+      val nZero = (0 until gForMask.length).count(i => gForMask(i) == 0.0)
+      useFastPath(x) = if (nZero / nSamp >= 0.5) 1.0 else 0.0
+
+      // The flipped residualized column is -Gscale, and its q is -score; see above.
+      val g1 = if (flip) -Gscale(::, x) else Gscale(::, x)
+      val q  = if (flip) -score(x) else score(x)
+
+      // The dispatch SPAtest makes: sparse variants take the fast path, which
+      // keeps the exact CGF only for the carriers and approximates the rest.
+      val naSet =
+        if (useFastPath(x) == 1.0)
+          Some((0 until gForMask.length).filter(i => gForMask(i) == 0.0))
+        else None
+
+      SaddleProb(q, Y0, g1, "BE", 5 * math.pow(10, -8), "P", None, None, false, naSet)("p.value")
+        .asInstanceOf[Double]
     }.toArray)
 
     // Transform SPA p-values into Z-scores
@@ -734,12 +916,43 @@ object FuncCalcuZScores {
 
     // Perform a projection of genotype matrix for correlation estimation (GHG is the residualized, cross-product matrix)
     val sqrtY0 = sqrt(Y0_vec)
-    val Xtilde = ((X(::, *) * sqrtY0).t).t
+    // X1, not X: HHalf must project out the same space the null model was fitted
+    // on, which is the defect fixed in getH_Binary (C1) appearing again here.
+    val Xtilde = ((X1(::, *) * sqrtY0).t).t
     val Hhalf = Xtilde * cholesky(inv(Xtilde.t * Xtilde))
     val Gtilde = ((G(::, *) * sqrtY0).t).t
     val GHhalf = Gtilde.t * Hhalf
     val GHG = (Gtilde.t * Gtilde) - (GHhalf * GHhalf.t)
-    val M = cov2cor(GHG)
+
+    // Zero-variance guard, mirroring GLOWr::getZ_marg_score_binary_SPA -- which
+    // uses a DIFFERENT rule from getZ_marg_score's, so this is not a copy of
+    // cov2corZeroSafe. R excludes a variant when its adjusted variance is not
+    // finite or falls below 1e-08 times the MEDIAN positive variance -- a
+    // relative threshold, not machine epsilon -- and reports the excluded
+    // variants as NA rather than neutralising them, because a saddlepoint
+    // p-value for a variant with no variance is meaningless rather than merely
+    // uninformative.
+    val varAdj = diag(GHG)
+    val posVar = (0 until varAdj.length).map(varAdj(_)).filter(v => !v.isNaN && !v.isInfinite && v > 0.0)
+    val varScale = if (posVar.nonEmpty) {
+      val srt = posVar.sorted
+      val n = srt.length
+      if (n % 2 == 1) srt(n / 2) else (srt(n / 2 - 1) + srt(n / 2)) / 2.0
+    } else 1.0
+    val okVar = (0 until varAdj.length).map { i =>
+      val v = varAdj(i)
+      !v.isNaN && !v.isInfinite && v > 1e-08 * varScale
+    }
+    val M = if (okVar.forall(identity)) cov2cor(GHG) else {
+      Console.err.println(s"WARNING: ${okVar.count(!_)} variant(s) with zero adjusted variance " +
+        "in getZ_marg_score_binary_SPA; their correlations are reported as NaN, as R reports NA.")
+      val out = BDM.fill[Double](GHG.rows, GHG.cols)(Double.NaN)
+      val keep = (0 until varAdj.length).filter(okVar)
+      val sub = BDM.tabulate(keep.length, keep.length)((a, b) => GHG(keep(a), keep(b)))
+      val subCor = cov2cor(sub)
+      for (a <- keep.indices; b <- keep.indices) out(keep(a), keep(b)) = subCor(a, b)
+      out
+    }
 
     // Dispersion parameter
     val s0 = 1.0
@@ -748,7 +961,13 @@ object FuncCalcuZScores {
       "Zscores" -> Zscores_spa,
       "M" -> M,
       "GHG" -> GHG,
-      "s0" -> s0
+      "s0" -> s0,
+      // Which variants SPAtest would route through fastSPA (1.0) rather than the
+      // plain saddlepoint (0.0). Additive: no existing caller reads it. Exposed
+      // so the dispatch is assertable now, before Saddle_Prob_fast exists --
+      // otherwise it could only be tested indirectly, once the two branches
+      // produce different numbers.
+      "fast_path" -> useFastPath
     )
   }
 
@@ -771,12 +990,12 @@ object FuncCalcuZScores {
     val GHG = getGHG_Binary(G, HHalf, y0)
 
     val score = G.t * resids
-    val Zscore = score /:/ sqrt(diag(GHG))
+    val Zscore = zScoresZeroSafe(score, GHG)
 
     return Map(
       "Zscores" -> Zscore,
       "scores" -> score,
-      "M_Z" -> cov2cor(GHG),
+      "M_Z" -> cov2corZeroSafe(GHG),
       "M_s" -> GHG,
       // s0 = 1 for binary trait
       "s0" -> 1.0
@@ -806,7 +1025,7 @@ object FuncCalcuZScores {
 
     val score = G.t * resids / s0
     // TEMPORARY SOLUTION
-    val Zscore: BDV[Double] = score /:/ sqrt(diag(GHG))
+    val Zscore: BDV[Double] = zScoresZeroSafe(score, GHG)
     // UNDO THAT LATER AND USE CODE BELOW
     // val Zscore: BDV[Double] = if (use_t) {
     //   val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
@@ -820,7 +1039,7 @@ object FuncCalcuZScores {
     return Map(
       "Zscores" -> Zscore,
       "scores" -> score,
-      "M_Z" -> cov2cor(GHG),
+      "M_Z" -> cov2corZeroSafe(GHG),
       "M_s" -> GHG,
       "s0" -> s0
     )
@@ -837,13 +1056,15 @@ object FuncCalcuZScores {
     // Compute residuals
     val score = G.t * resids / s0
 
-    val XWithIntercept = BDM.horzcat(BDM.ones[Double](X.rows, 1), X)
+    // nullDesign, not an unconditional horzcat: a duplicated intercept column
+    // makes the regression design matrix singular. Same fix as in getZMargScore.
+    val XWithIntercept = nullDesign(X)
     val Zscore: BDV[Double] = BDV((0 until G.cols).map { j => contZScore(G(::, j), XWithIntercept, Y) }.toArray)
 
     return Map(
       "Zscores" -> Zscore,
       "scores" -> score,
-      "M_Z" -> cov2cor(ghg),
+      "M_Z" -> cov2corZeroSafe(ghg),
       "M_s" -> ghg,
       "s0" -> s0
     )
