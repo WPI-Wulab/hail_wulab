@@ -6,6 +6,14 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar and Peter Howell
 Last update (latest update first):
+  Claude Code (Opus 5.5), prompted by VPanwar, 2026-10-21: getZ_marg_score_binary_SPA now returns its
+    two matrices under "M_Z" and "M_s" instead of "M" and "GHG". The four GLOW_* wrappers read
+    "M_Z" / "M_s", so with the old names the SPA branch of GLOW.scala threw "key not found: M_Z" on
+    its first group and had never run (C2 smoke test, 2026-10-07). A rename only -- no value
+    changes: GLOWr itself returns list(M_Z = M, M_s = GHG), and the group-C fixtures assert these
+    matrices against those oracle keys at 1e-10. Option A of GLOWh's
+    0project/ai-reports/2026-10-21-spa-key-mismatch-fix-proposal.md.
+    Mirrors: GLOWr's getZ_marg_score_binary_SPA return list.
   Claude Code (Opus 5), prompted by VPanwar, 2026-09-15: Ported Saddle_Prob_fast, on ZWu's decision
     that GLOWr's output is the target -- GLOWr calls SPAtest with method = "fastSPA", which keeps
     the exact CGF only for subjects with a non-zero RAW genotype and replaces the whole excluded
@@ -829,8 +837,10 @@ object FuncCalcuZScores {
     * 
     * @return   A Map containing:
     *             - "Zscores": BDV[Double] of SPA Z-scores for each variant
-    *             - "M": BDM[Double] of correlation matrix for variants (after projection)
-    *             - "GHG": BDM[Double] of G'G adjusted for covariates
+    *             - "M_Z": BDM[Double], correlation matrix of the Z-scores, cov2cor of "M_s"
+    *                      (NaN rows/columns for zero-adjusted-variance variants, as R gives NA)
+    *             - "M_s": BDM[Double], null covariance of the scores, G'[V - VX(X'VX)^-1 X'V]G
+    *                      with V = diag(mu(1 - mu)) -- the covariate-adjusted GHG
     *             - "s0": Double, dispersion parameter (currently fixed at 1.0)
     */
   def getZ_marg_score_binary_SPA (
@@ -959,8 +969,11 @@ object FuncCalcuZScores {
 
     Map(
       "Zscores" -> Zscores_spa,
-      "M" -> M,
-      "GHG" -> GHG,
+      // GLOWr's names, which the four GLOW_* wrappers read: R returns
+      // list(M_Z = M, M_s = GHG). M_Z is the correlation of the Z-scores
+      // (cov2cor of GHG); M_s is the null covariance of the scores, GHG itself.
+      "M_Z" -> M,
+      "M_s" -> GHG,
       "s0" -> s0,
       // Which variants SPAtest would route through fastSPA (1.0) rather than the
       // plain saddlepoint (0.0). Additive: no existing caller reads it. Exposed
