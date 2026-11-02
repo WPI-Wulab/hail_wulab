@@ -4,6 +4,16 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
 Creators: Kylie Hoar
 Last update (latest update first):
+  Claude Code (Opus 5.5), prompted by VPanwar, 2026-10-28: the "mvn" branch passed one_sided
+    positionally into getGFisherCor's 4th parameter, varCorrect, so two-sided input ran with
+    varCorrect = false and one_sided at its default. Now passed by name, which leaves varCorrect
+    = true as GFisher's pval.oGFisher does. The variance correction scales each variant within a
+    statistic; when a statistic's df is constant across variants it factors out of that
+    statistic and getGFisherCor's final cov2cor removes it, so the defect changed the result
+    only for rows of DF with mixed df. The branch is not reached from GFisher.scala, which
+    always uses the default combine = "cct". Defect D2 of GLOWh's
+    0project/ai-reports/2026-10-19-track-c-outcome-probe-and-discrepancies.md section 7.
+    Mirrors: GFisher 0.3.2 pval.oGFisher.
   KHoar 2025-04-23: Added docstrings and internal comments
 */
 
@@ -63,7 +73,10 @@ object PvalOGFisher {
       case "mvn" =>
         val minpStat = out("minp").asInstanceOf[Double]
         val nd = DF.rows
-        val corGFisher = GFisherCor.getGFisherCor(DF, W, M, one_sided)
+        // one_sided by NAME: the 4th positional parameter is varCorrect, so the positional call
+        // set varCorrect = one_sided (false for two-sided input). GFisher's pval.oGFisher calls
+        // getGFisherCOR(DD = DF, W = W, M = M, p.type = p.type), leaving var.correct = TRUE.
+        val corGFisher = GFisherCor.getGFisherCor(DF, W, M, one_sided = one_sided)
         val regularizedCor = corGFisher + BDM.eye[Double](corGFisher.rows) * 1e-5
         val mean = BDV.zeros[Double](nd)
         // val lower = BDV.fill(nd)(Double.NegativeInfinity)
