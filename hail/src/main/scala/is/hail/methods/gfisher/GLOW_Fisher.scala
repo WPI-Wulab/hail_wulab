@@ -5,6 +5,9 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar
 Last update (latest update first):
+  Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-02: optimalWeightsM no longer has a `fisher`
+    parameter (GLOWr 0.3.4 port: the null mean is integrated, not set to 2.0); the call passes
+    its arguments by name. Mirrors: GLOWr 0.3.4 GLOW_Fisher / Optimal_Weights_M.
   KHoar 2025-04-23: Added comments and docstrings
 */
 
@@ -45,7 +48,8 @@ object GLOW_Fisher {
         // Conduct Fisher Test and get optimal weights
         val gFisher: Double => Double = x => FuncCalcuCombTests.g_GFisher_two(x, 2)
         val statDFFisher = 2.0
-        val wtsOptFisher = OptimalWeights.optimalWeightsM(gFisher, Bstar, PI, M, false, true)
+        val wtsOptFisher = OptimalWeights.optimalWeightsM(gFisher, Bstar, PI, M, burden = false,
+          forcePositiveWeights = true)
         val WT_opt_fisher = BDM.vertcat(wtsOptFisher, wtsEqu)
         val DF_opt_fisher = BDM.fill(WT_opt_fisher.rows, 1)(statDFFisher)
 

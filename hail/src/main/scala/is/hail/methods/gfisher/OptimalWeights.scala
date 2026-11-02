@@ -8,6 +8,30 @@
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
   * @author Peter Howell
   * Last update (latest update first):
+  *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-02: ported GLOWr 0.3.4's quadrature and
+  *     Hermite expansion (ZWuLab/GLOWr tag v0.3.4, R/optimal_weights.R and
+  *     R/optimal_weights_quadrature.R). Every one-dimensional integral against the normal density
+  *     (E_gX_p, the Hermite coefficients, the variances) now uses one composite 10-point
+  *     Gauss-Legendre rule on [-12, 12], panels of width 0.1, cut where g's argument is zero (the
+  *     kink of the Fisher transform), replacing adaptive Gauss-Kronrod, which GLOWr's
+  *     integrate() counterpart showed could be far off on the stretched Fisher transform. The
+  *     Mehler expansion runs to order 64 (was 8) in the normalized Hermite functions by their
+  *     recurrence, with no factorials, in both the _N and the _sparse schemes. New
+  *     optimalWeightMoments (GLOWr's .optimal_weight_moments) computes all four schemes from one
+  *     coefficient table, each distinct (mu, s) pair integrated once; new helpers normalNodes,
+  *     hermiteMoments, hermiteTable, mehlerSum. The _N null covariance keeps the truncated
+  *     series on its diagonal; the sparse covariance's diagonal is the exact mixture variance by
+  *     the law of total variance with centered variances (varT_mix likewise; it was
+  *     E[g^2] - (E g)^2). The `fisher` flag (null mean replaced by 2.0) is removed from
+  *     optimalWeightsM, getRTilde, E_T_mix and getR: the null mean is integrated, as in GLOWr.
+  *     covM_Integrand and covM_IntegrandScaled are removed (no remaining callers). getWts and
+  *     optimalWeightsM_Burden return equal weights 1/n, with a warning, when all weights are
+  *     effectively zero (mean |w| below machine epsilon), as GLOWr's get_wts and
+  *     Optimal_Weights_M do; they returned NaN (0/0). See GLOWh's
+  *     0project/ai-reports/2026-10-28-fork-port-progress.md.
+  *     Mirrors: GLOWr 0.3.4 Optimal_Weights_M, .optimal_weight_moments, CovM_gXgY, CovMT_mix,
+  *     E_gX_p, E_T_mix, Var_T_mix, get_r_tilde, get_r, and the helpers of
+  *     optimal_weights_quadrature.R.
   *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-10-28: covM_gXgY standardized (GLOWh port
   *     plan change (c)). optimalWeightsM passed the covariance M + MVM to covM_gXgY for APE_N,
   *     but the Mehler expansion is in powers of a CORRELATION: order k was scaled by
@@ -46,16 +70,13 @@
 
 package is.hail.methods.gfisher
 
-import is.hail.GaussKronrod
 import is.hail.stats.eigSymD
-import is.hail.utils.fatal
+import is.hail.utils.{fatal, warn}
 
 import breeze.linalg.{DenseVector => BDV, DenseMatrix => BDM, _}
 import breeze.numerics.{abs, sqrt}
 import breeze.stats.{stddev, mean}
 import net.sourceforge.jdistlib.Normal
-
-import org.apache.commons.math3.util.CombinatoricsUtils.factorialDouble
 
 object OptimalWeights {
 
@@ -91,12 +112,17 @@ object OptimalWeights {
   /**
     * Calculate the optimal weights based on Bstar (scaled effect size), PI (likelihood of causality), and M (correlation matrix of marginal Z-scores)
     *
-    * @param g
-    * @param bStar
-    * @param pi
-    * @param M
-    * @param burden
-    * @param forcePositiveWeights
+    * Mirrors GLOWr 0.3.4's Optimal_Weights_M: for a non-Burden g the four weight vectors come
+    * from one table of moments (optimalWeightMoments, GLOWr's .optimal_weight_moments) and
+    * GLOWr's get_wts (getWts).
+    *
+    * @param g transformation of the Z-scores
+    * @param bStar scaled effect sizes
+    * @param pi likelihoods of causality, in [0, 1]
+    * @param M correlation matrix of the marginal Z-scores
+    * @param burden true for the Burden/Liptak test (g(x) = x), which has closed-form weights
+    * @param forcePositiveWeights if true, negative weights are set to 0
+    * @return a 4 x n matrix (2 x n for Burden), rows BE_N, APE_N, BE_sparse, APE_sparse
     */
   def optimalWeightsM(
     g: (Double) => Double,
@@ -104,7 +130,6 @@ object OptimalWeights {
     pi: BDV[Double],
     M: BDM[Double],
     burden: Boolean,
-    fisher: Boolean = false,
     forcePositiveWeights: Boolean=true
   ): BDM[Double] = {
 
@@ -113,48 +138,88 @@ object OptimalWeights {
       return optimalWeightsM_Burden(bStar, pi, M, forcePositiveWeights)
     }
 
-    val n = bStar.length
-    val mu: BDV[Double] = bStar *:* pi  // mean of theta (random effects)
-    val mmu: BDV[Double] = M * mu // mean of marginal Z-scores when effects are random
-    val v: BDV[Double] = (bStar ^:^ 2.0) *:* pi *:* (1.0 - pi) // variance of theta (random effects)
-    // I think (`diag(v) * M` is equal to `v *:* M(::, *)`, and I believe the former is faster)
-    val MVM: BDM[Double] = (v *:* M(::, *)).t * M // faster way to compute M'VM, when V is a diagonal matrix. M+MVM is the variance matrix of marginal Z-scores when effects are random
-
-    // Normal approximation
-
-    // Under H1 the marginal Z-scores are N(MMU, Sigma_tilde) with Sigma_tilde = M + MVM.
-    // getRTilde takes the STANDARD DEVIATION of each Z_i, so pass sqrt of the diagonal,
-    // not the variance (GLOWr 0.3.3: SD_tilde <- sqrt(diag(Sigma_tilde))).
-    val sigmaTilde: BDM[Double] = M + MVM
-    val sdTilde: BDV[Double] = sqrt(diag(sigmaTilde))
-    val rTilde: BDV[Double] = getRTilde(g, mmu, sdTilde, fisher)
-
-    // Bahadur efficiency (BE): moments under H0, where the Z_i are standard normal with
-    // correlation M -- so plain M, zero means and NO scales.
-    val sigmaBETilde: BDM[Double] = covM_gXgY(g, BDV.zeros[Double](n), BDV.zeros[Double](n), M)
-    val wts_BE = getWts(sigmaBETilde, rTilde, forcePositiveWeights)
-    // Asymptotic power efficiency (APE): moments under H1, Z ~ N(MMU, Sigma_tilde). The Mehler
-    // expansion needs a CORRELATION matrix, so Sigma_tilde is split into its correlation and its
-    // standard deviations, and the scales enter through g's argument (GLOWr 0.3.3:
-    // CovM_gXgY(g, MMU, MMU, M = cov2cor(Sigma_tilde), SD1 = SD_tilde, SD2 = SD_tilde)).
-    // Passing Sigma_tilde itself scaled order k by Sigma^k / k!: exact for a quadratic g, but it
-    // amplified the quadrature residue of the higher coefficients by up to ~881^8 on real data.
-    val rTildeCorr: BDM[Double] = cov2cor(sigmaTilde)
-    diag(rTildeCorr) := 1.0 // as stats::cov2cor does; this package's cov2cor leaves 1 +/- rounding
-    val sigmaAPETilde: BDM[Double] = covM_gXgY(g, mmu, mmu, rTildeCorr, sd1 = sdTilde, sd2 = sdTilde)
-    val wts_APE: BDV[Double] = getWts(sigmaAPETilde, rTilde, forcePositiveWeights)
-
-    // Sparse approximation
-
-    val r = getR(g, bStar, pi, fisher)
-    // Bahadur efficiency
-    val sigmaBE = getSigma(g, bStar, pi, M, h1 = false)
-    val wts_BE_sparse = getWts(sigmaBE, r, forcePositiveWeights)
-    // asymptotic power rate
-    val sigmaAPE = getSigma(g, bStar, pi, M, h1 = true)
-    val wts_APE_sparse = getWts(sigmaAPE, r, forcePositiveWeights)
+    // The normal approximation (BE_N, APE_N) and the sparse mixture (BE_sparse, APE_sparse), all
+    // from one coefficient table at the default 64 Hermite orders.
+    val mom = optimalWeightMoments(g, bStar, pi, M)
+    val wts_BE = getWts(mom.sigmaBEN, mom.rN, forcePositiveWeights)
+    val wts_APE = getWts(mom.sigmaAPEN, mom.rN, forcePositiveWeights)
+    val wts_BE_sparse = getWts(mom.sigmaBESparse, mom.rSparse, forcePositiveWeights)
+    val wts_APE_sparse = getWts(mom.sigmaAPESparse, mom.rSparse, forcePositiveWeights)
 
     return BDM(wts_BE, wts_APE, wts_BE_sparse, wts_APE_sparse)
+  }
+
+  /**
+    * The moments behind the non-Burden optimal weights, from one table of Hermite coefficients
+    * over the null pair (0, 1), the normal-approximation pairs (MMU_i, s_i) and the sparse pairs
+    * (Bstar_i, 1). Mirrors GLOWr 0.3.4's .optimal_weight_moments.
+    *
+    * Normal approximation: under H1 the Z-scores are N(MMU, M + MVM), MMU = M (Bstar * PI),
+    * handled as MMU_i + s_i U_i with s_i = sqrt((M + MVM)_ii) and U ~ N(0, R), R the correlation
+    * matrix of M + MVM (Mehler's expansion needs a correlation).
+    *   rN          E[g(Z~_i)] - E[g(Z_0)]
+    *   sigmaBEN    the null covariance: the truncated series in M (its diagonal is the truncated
+    *               sum, not the exact variance; GLOWr found that better for the weights)
+    *   sigmaAPEN   the series in R with the stretched coefficients b_k(MMU_i, s_i)
+    * Sparse mixture: Z_i = Z_0i + Bstar_i C_i, C_i ~ Bernoulli(PI_i).
+    *   rSparse         PI_i (E_1(i) - E_0)
+    *   sigmaAPESparse  off-diagonal from the four causal combinations; diagonal the mixture's own
+    *                   variance by the law of total variance, with centered variances
+    *   sigmaBESparse   the null series in M, with the exact null variance on its diagonal
+    *
+    * @param ORD the Hermite orders summed (default 1 to 64)
+    */
+  def optimalWeightMoments(
+    g: (Double) => Double,
+    bStar: BDV[Double],
+    pi: BDV[Double],
+    M: BDM[Double],
+    ORD: Seq[Int] = 1 to 64
+  ): OptimalWeightMoments = {
+    val n = bStar.length
+    val ord = checkOrd(ORD)
+    val K = ord.max
+
+    val mu: BDV[Double] = bStar *:* pi                              // mean of theta
+    val v: BDV[Double] = (bStar ^:^ 2.0) *:* pi *:* (1.0 - pi)      // variance of theta
+    val mmu: BDV[Double] = M * mu                                   // H1 mean of the Z-scores
+    val sigmaTilde: BDM[Double] = M + (v *:* M(::, *)).t * M        // M + M diag(v) M
+    val sdTilde: BDV[Double] = sqrt(diag(sigmaTilde))
+    val rTilde: BDM[Double] = cov2cor(sigmaTilde)
+    diag(rTilde) := 1.0 // as stats::cov2cor does; this package's cov2cor leaves 1 +/- rounding
+
+    // One table: column 0 the null pair, then the normal pairs, then the sparse pairs.
+    val tabMu = BDV.vertcat(BDV(0.0), mmu, bStar)
+    val tabS = BDV.vertcat(BDV(1.0), sdTilde, BDV.ones[Double](n))
+    val tab = hermiteTable(g, tabMu, tabS, K)
+    val b0: BDV[Double] = tab.b(::, 0).copy
+    val bN: BDM[Double] = tab.b(::, 1 to n).copy
+    val bS: BDM[Double] = tab.b(::, (n + 1) to (2 * n)).copy
+    val B0: BDM[Double] = BDM.tabulate(K + 1, n)((k, _) => b0(k))
+
+    // Normal approximation
+    val rN: BDV[Double] = bN(0, ::).t - b0(0)
+    val sigmaNull = mehlerSum(B0, B0, M, ord)
+    val sigmaAPEN = mehlerSum(bN, bN, rTilde, ord)
+
+    // Sparse mixture: off-diagonals over the causal combinations, P(C_i = a, C_j = b)
+    val q: BDV[Double] = 1.0 - pi
+    val cov11 = mehlerSum(bS, bS, M, ord)
+    val cov10 = mehlerSum(bS, B0, M, ord)
+    val sigmaAPESparse: BDM[Double] = ((pi * pi.t) *:* cov11) + ((pi * q.t) *:* cov10) +
+      ((q * pi.t) *:* cov10.t) + ((q * q.t) *:* sigmaNull)
+    val e1: BDV[Double] = bS(0, ::).t.copy
+    val e0 = b0(0)
+    val var0 = tab.variance(0)
+    for (i <- 0 until n) {
+      val d = e1(i) - e0
+      sigmaAPESparse(i, i) = q(i) * var0 + pi(i) * tab.variance(1 + n + i) + pi(i) * q(i) * d * d
+    }
+    val sigmaBESparse = sigmaNull.copy
+    diag(sigmaBESparse) := var0
+    val rSparse: BDV[Double] = pi *:* (e1 - e0)
+
+    OptimalWeightMoments(rN, sigmaNull, sigmaAPEN, rSparse, sigmaBESparse, sigmaAPESparse)
   }
 
   def optimalWeightsM_Burden(
@@ -173,8 +238,14 @@ object OptimalWeights {
       wts_APE(wts_APE <:< 0.0) := 0.0
       wts_BE(wts_BE <:< 0.0) := 0.0
     }
-    wts_BE := wts_BE / (mean(abs(wts_BE)))
-    wts_APE := wts_APE / (mean(abs(wts_APE)))
+    // As GLOWr's Optimal_Weights_M: all-zero weights give equal weights 1/n with a warning.
+    for ((w, name) <- Seq((wts_BE, "BE"), (wts_APE, "APE"))) {
+      val meanAbs = mean(abs(w))
+      if (meanAbs < math.ulp(1.0)) {
+        warn(s"All $name weights are effectively zero. Returning equal weights.")
+        w := 1.0 / w.length
+      } else w := w / meanAbs
+    }
     return BDM(wts_BE, wts_APE)
   }
 
@@ -242,20 +313,24 @@ object OptimalWeights {
 
   /**
     * Calculate the vector of E_1(T_i)-E_0(T_i) for i=1,...,n
-    * where T_i=g(Z_i), Z_i = Z_0i + Ztilde_i, Ztilde_i ~ N(mu_i,sd_i), Z_0i~N(0,1)
+    * where T_i=g(Z_i), Z_i ~ N(mu_i, sd_i^2) under H1 and Z_0 ~ N(0, 1) under H0.
+    * Mirrors GLOWr 0.3.4's get_r_tilde: the null mean E_gX_p(g, 0, 1, 1) is integrated, never
+    * replaced by a constant (the former `fisher` shortcut, 2.0, is gone).
     *
     * @param g transfrmation function of Z
-    * @param mu vector of mean mu_i, i=1,...,n.
+    * @param mmu vector of means mu_i, i=1,...,n.
     * @param sd vector of standard deviations of Z_i, i=1,...,n.
     */
-  def getRTilde(g: (Double) => Double, mmu: BDV[Double], sd: BDV[Double], fisher: Boolean): BDV[Double] = {
+  def getRTilde(g: (Double) => Double, mmu: BDV[Double], sd: BDV[Double]): BDV[Double] = {
     val n = mmu.size
-    val e0 = if (fisher) 2.0 else E_gX_p(g, 0.0, 1.0, 1.0)
-    return BDV.tabulate(n){(i) => E_gX_p(g, mmu(i),  1.0, sd(i)) - e0}
+    val e0 = E_gX_p(g, 0.0, 1.0, 1.0)
+    return BDV.tabulate(n){(i) => E_gX_p(g, mmu(i), 1.0, sd(i)) - e0}
   }
 
   /**
-    * Calculate E[g(X)^p] where X~N(mu,sigma)
+    * Calculate E[g(X)^p] where X~N(mu,sigma^2), on the composite Gauss-Legendre rule of
+    * normalNodes, in the standardized variable u = (x - mu) / sigma, cut where g's argument
+    * mu + sigma u is 0. Mirrors GLOWr 0.3.4's E_gX_p.
     *
     * @param g function
     * @param mu mean
@@ -263,8 +338,21 @@ object OptimalWeights {
     * @param sigma std
     */
   def E_gX_p(g: Double => Double, mu: Double, p: Double, sigma:Double=1.0): Double = {
-    val integrator = new GaussKronrod(1e-12, 100)
-    return integrator.integrate((x) => math.pow(g(x), p) * Normal.density((x-mu)/sigma, 0, 1.0, false), mu-8*sigma, mu+8*sigma).estimate / sigma
+    if (!(sigma > 0.0) || sigma.isInfinite)
+      fatal(s"sigma must be a single finite positive number; got $sigma")
+    val (u, w) = normalNodes(-mu / sigma)
+    var value = 0.0
+    for (i <- u.indices) {
+      val x = mu + sigma * u(i)
+      val gx = g(x)
+      if (gx.isNaN || gx.isInfinite)
+        fatal(s"The transformation g returned a non-finite value at x = $x (mu = $mu, sigma = $sigma).")
+      value += math.pow(gx, p) * Normal.density(u(i), 0.0, 1.0, false) * w(i)
+    }
+    if (value.isNaN || value.isInfinite)
+      fatal(s"E[g(X)^$p] is not finite (mu = $mu, sigma = $sigma): the transformation grows too fast " +
+        "for the fixed quadrature domain.")
+    return value
   }
 
   /**
@@ -278,73 +366,54 @@ object OptimalWeights {
   def getWts(Sigma: BDM[Double], r: BDV[Double], forcePosW: Boolean=true, normalize:Boolean = true): BDV[Double] = {
     val w = inv(Sigma) * r
     if (forcePosW) w(w <:< 0.0) := 0.0
-    if (normalize) w := w /:/ mean(abs(w))
+    if (normalize) {
+      // As GLOWr's get_wts: weights that are all effectively zero (e.g. every PI = 0, so
+      // r = 0) cannot be normalized; return equal weights 1/n with a warning, not 0/0 = NaN.
+      val meanAbs = mean(abs(w))
+      if (meanAbs < math.ulp(1.0)) {
+        warn("All weights are effectively zero in optimal weight calculation. Returning equal weights.")
+        w := 1.0 / w.length
+      } else w := w /:/ meanAbs
+    }
     return w
   }
 
   /**
-    * The function integrated by covM_gXgY
-    *
-    * @param x variable of integration
-    * @param g transformation function
-    * @param mu mean value
-    * @param ORD order of Hermite polynomial
-    */
-  def covM_Integrand(x: Double, g: Double => Double, mu: Double, ORD: Int): Double = {
-    return g(x) * Normal.density(x-mu, 0.0, 1.0, false) * hermite_scalar(x - mu, ORD)
-  }
-
-  /**
-    * The function integrated by covM_gXgY when a scale is present: the order-ORD Hermite
-    * coefficient of g(mu + s*U), U ~ N(0, 1), written in the variable x = mu + U so the density
-    * and the Hermite basis stay standard and the integration window mu +/- 8 stays fixed
-    * whatever s is. Only g's argument is rescaled (GLOWr 0.3.3's CovM_gXgY integrand).
-    *
-    * @param s standard deviation of the variable g is applied to; s = 1 reduces to covM_Integrand
-    */
-  def covM_IntegrandScaled(x: Double, g: Double => Double, mu: Double, s: Double, ORD: Int): Double = {
-    return g(mu + s * (x - mu)) * Normal.density(x-mu, 0.0, 1.0, false) * hermite_scalar(x - mu, ORD)
-  }
-
-  /**
     * Calculate the covariance matrix with elements Cov[g(X_i), g(Y_j)], where
-    *   X_i = mu1_i + sd1_i Z_i,  Y_j = mu2_j + sd2_j Z_j,  Z ~ MVN(0, M),  M a CORRELATION matrix,
-    * by Mehler's expansion: sum over k of c_k(mu1_i, sd1_i) c_k(mu2_j, sd2_j) M_ij^k / k!, where
-    * c_k(mu, s) is the order-k Hermite coefficient of g(mu + s U). Without sd1/sd2 the scales are
-    * 1 and the result is unchanged from before they existed.
+    *   X_i = mu1_i + sd1_i U_i,  Y_j = mu2_j + sd2_j U_j,  U ~ MVN(0, M),  M a CORRELATION matrix,
+    * by Mehler's expansion in the normalized Hermite functions:
+    *   sum over k in ORD of b_k(mu1_i, sd1_i) b_k(mu2_j, sd2_j) M_ij^k,
+    * where b_k(mu, s) = E[g(mu + s U) he_k(U)] (hermiteTable). No factorials: he_k = He_k / sqrt(k!).
+    * Mirrors GLOWr 0.3.4's CovM_gXgY.
     *
     * M must be a correlation matrix: the expansion is in powers of a correlation. A covariance
     * passed in its place is rejected -- pass cov2cor(Sigma) with sd = sqrt(diag(Sigma)).
     *
-    * Guards, as GLOWr 0.3.3's CovM_gXgY: M positive semi-definite (smallest eigenvalue >= -1e-10;
+    * Guards, as GLOWr's CovM_gXgY: M positive semi-definite (smallest eigenvalue >= -1e-10;
     * R's check_positive_definite also WARNS below +1e-10, which is not ported); mu1, mu2, sd1 and
-    * sd2 of equal length; sd1, sd2 > 0; diag(M) within 1e-8 of 1. Not ported: R's identity-matrix
-    * fast path, a speed-up only -- for M = I the general sum gives the same values, since the
-    * off-diagonal powers are 0.
+    * sd2 of equal length; sd1, sd2 > 0; diag(M) within 1e-8 of 1; ORD positive integers. Not
+    * ported: R's identity-matrix fast path, a speed-up only -- for M = I the general sum gives the
+    * same values, since the off-diagonal powers are 0.
     *
     * @param g transformation function
     * @param mu1 mean vector of length n
     * @param mu2 another mean vector of length n
     * @param M an n x n correlation matrix
-    * @param ORD a sequence of orders of Hermite polynomials
+    * @param ORD the orders of the expansion summed (default 1 to 64)
     * @param sd1 standard deviations of X; null (R's NULL) means all 1
     * @param sd2 standard deviations of Y; null means all 1
-    * @TODO ensure that ORD starts at 1 and is sequential
-    * alternatively: accept an integer that just represents number of terms to use
     */
   def covM_gXgY(
     g: Double => Double,
     mu1: BDV[Double],
     mu2: BDV[Double],
     M: BDM[Double],
-    ORD: Seq[Int] = Seq(1,2,3,4,5,6,7,8),
+    ORD: Seq[Int] = 1 to 64,
     sd1: BDV[Double] = null,
     sd2: BDV[Double] = null
   ): BDM[Double] = {
+    checkPSD(M)
     val n = mu1.size
-    val minEig = min(eigSymD.justEigenvalues(M))
-    if (minEig < -1e-10)
-      fatal(f"Correlation matrix M must be positive semi-definite. Minimum eigenvalue: $minEig%.2e")
     val s1: BDV[Double] = if (sd1 == null) BDV.ones[Double](n) else sd1
     val s2: BDV[Double] = if (sd2 == null) BDV.ones[Double](n) else sd2
     if (mu2.size != n || s1.size != n || s2.size != n)
@@ -355,67 +424,60 @@ object OptimalWeights {
     if (any(abs(diag(M) - 1.0) >:> 1e-8))
       fatal("M must be a correlation matrix (unit diagonal); pass cov2cor(Sigma) with sd1 and sd2. " +
         s"Largest |diag(M) - 1| = ${max(abs(diag(M) - 1.0))}")
+    val ord = checkOrd(ORD)
 
-    // Hermite coefficients, one column per variable, computed once per distinct (mu, s) pair --
-    // the symmetric APE call and the all-zero BE call repeat pairs heavily. s == 1 keeps the
-    // original integrand, so every unit-scale caller gets bit-identical coefficients.
-    val integrator = new GaussKronrod(1e-9, 100)
-    def coefs(mu: BDV[Double], s: BDV[Double]): BDM[Double] = {
-      val out = BDM.zeros[Double](ORD.size, mu.size)
-      val pairs = (0 until mu.size).map(k => (mu(k), s(k))).distinct
-      for (i <- 0 until ORD.size; (m, sc) <- pairs) {
-        // Written inline: GaussKronrod (Java) takes a java.util.function.Function, which Scala
-        // converts from a lambda literal but not from a value of Scala function type.
-        val c = integrator.integrate(
-          (x) => if (sc == 1.0) covM_Integrand(x, g, m, ORD(i)) else covM_IntegrandScaled(x, g, m, sc, ORD(i)),
-          m - 8.0,
-          m + 8.0
-        ).estimate
-        for (k <- 0 until mu.size if mu(k) == m && s(k) == sc) out(i, k) = c
-      }
-      out
-    }
-    val coef1 = coefs(mu1, s1)
-    val coef2 = coefs(mu2, s2)
-
-    val M_out = BDM.zeros[Double](mu1.size, mu1.size)
-    for (ord <- ORD) {
-      // outer product of the rows of the coefficient matrices
-      // must subtract 1 from ord because scala is 0-indexed
-      M_out := M_out + (coef1(ord-1,::).t * coef2(ord-1,::)) *:* (M ^:^ (ord.toDouble) ) /:/ factorialDouble(ord)
-    }
-
-    return M_out
+    // Coefficients of every distinct (mean, scale) pair among the X and Y components.
+    val tab = hermiteTable(g, BDV.vertcat(mu1, mu2), BDV.vertcat(s1, s2), ord.max)
+    val b1 = tab.b(::, 0 until n).copy
+    val b2 = tab.b(::, n until 2 * n).copy
+    return mehlerSum(b1, b2, M, ord)
   }
-
 
   /**
     * Calculate the covariance matrix Cov[T_i, T_j], where T_i=g(Z_i), T_j=g(Z_j),
     * Z_i = Z_0i + mu_i*C_i, C_i ~ Bern(pi_i), Z_j = Z_0j + mu_j*C_j, C_j ~ Bern(pi_j),
-    * Cov[Z_0i, Z_0i] = M_ij,
+    * Cov[Z_0i, Z_0j] = M_ij. Mirrors GLOWr 0.3.4's CovMT_mix (without its cache of the null
+    * covariance, a speed-up only).
+    *
+    * Off-diagonal: the four causal combinations, weighted by P(C_i = a, C_j = b). Diagonal: the
+    * mixture's own variance by the law of total variance, (1 - pi) Var_0 + pi Var_1 +
+    * pi (1 - pi) (E_1 - E_0)^2, with centered variances (the sum over combinations would treat
+    * C_i as independent of itself).
     *
     * @param g transformation function
     * @param mu mean vector
     * @param pi probability vector
-    * @param M a positive-definite correlation matrix
-    * @param ORD a sequence of orders of Hermite polynomials (unused, as the original code does not use this)
+    * @param M a positive-semidefinite correlation matrix
+    * @param ORD the orders of the expansion summed (default 1 to 64)
     */
   def covMT_mix(
     g: (Double) => Double,
     mu: BDV[Double],
     pi: BDV[Double],
     M: BDM[Double],
-    ORD: Seq[Int]= Seq(1,2,3,4,5,6,7,8) // never actually used (like in the R code)
+    ORD: Seq[Int] = 1 to 64
   ): BDM[Double] = {
-    val pp: BDM[Double] = pi * pi.t
+    checkPSD(M)
+    val n = mu.size
+    val ord = checkOrd(ORD)
+    val K = ord.max
+    // One table: the causal pairs (mu_i, 1) and the null pair (0, 1)
+    val tab = hermiteTable(g, BDV.vertcat(mu, BDV(0.0)), BDV.ones[Double](n + 1), K)
+    val b1 = tab.b(::, 0 until n).copy
+    val b0: BDV[Double] = tab.b(::, n).copy
+    val B0: BDM[Double] = BDM.tabulate(K + 1, n)((k, _) => b0(k))
+
     val q: BDV[Double] = 1.0 - pi
-    val pq: BDM[Double] = pi * q.t
-    val qq: BDM[Double] = q * q.t
-    val covM: BDM[Double] = covM_gXgY(g, mu, mu, M, (1 to 8).toList)
-    val covM0: BDM[Double] = covM_gXgY(g, mu, BDV.zeros[Double](mu.size), M, (1 to 8).toList)
-    val covM00: BDM[Double] = covM_gXgY(g, BDV.zeros[Double](mu.size), BDV.zeros[Double](mu.size), M, (1 to 8).toList)
-    val M_out = (pp *:* covM) + (pq *:* covM0) + (pq.t *:* covM0.t) + (qq *:* covM00)
-    diag(M_out) := varT_mix(g, mu, pi) // R code did this with sapply, so the arguments to varT_mix are scalar
+    val covM = mehlerSum(b1, b1, M, ord)
+    val covM1 = mehlerSum(b1, B0, M, ord)
+    val covM3 = mehlerSum(B0, B0, M, ord)
+    val M_out = ((pi * pi.t) *:* covM) + ((pi * q.t) *:* covM1) + ((q * pi.t) *:* covM1.t) + ((q * q.t) *:* covM3)
+    val e0 = b0(0)
+    val var0 = tab.variance(n)
+    for (i <- 0 until n) {
+      val d = b1(0, i) - e0
+      M_out(i, i) = q(i) * var0 + pi(i) * tab.variance(i) + pi(i) * q(i) * d * d
+    }
     return M_out
   }
 
@@ -431,28 +493,32 @@ object OptimalWeights {
   }
 
   /**
-    * Calculate Var[T_i], where T_i=g(Z_i), Z_i = Z_0i + mu_i*C_i, C_i ~ Bern(pi_i)
+    * Calculate Var[T_i], where T_i=g(Z_i), Z_i = Z_0i + mu_i*C_i, C_i ~ Bern(pi_i), by the law of
+    * total variance over C_i: pi Var_1 + (1 - pi) Var_0 + pi (1 - pi) (E_1 - E_0)^2, where E_a and
+    * Var_a are the mean and the centered variance of g(a mu + Z_0), so a large mean does not
+    * cancel against a large second moment. Mirrors GLOWr 0.3.4's Var_T_mix.
     *
     * @param g
     * @param mu
     * @param pi
     */
   def varT_mix(g: (Double) => Double, mu: Double, pi: Double): Double = {
-    return pi * E_gX_p(g, mu, 2.0) + (1.0 - pi) * E_gX_p(g, 0.0, 2.0)  - math.pow(E_T_mix(g, mu, pi, false), 2.0)
+    val m1 = hermiteMoments(g, mu, 1.0, 0)
+    val m0 = hermiteMoments(g, 0.0, 1.0, 0)
+    val d = m1.b(0) - m0.b(0)
+    return pi * m1.variance + (1.0 - pi) * m0.variance + pi * (1.0 - pi) * d * d
   }
 
   /**
-    * Calculate E[T_i], where T_i=g(Z_i), Z_i = Z_0i + mu_i*C_i, C_i ~ Bern(pi_i)
+    * Calculate E[T_i], where T_i=g(Z_i), Z_i = Z_0i + mu_i*C_i, C_i ~ Bern(pi_i):
+    * pi E[g(Z_0 + mu)] + (1 - pi) E[g(Z_0)]. Mirrors GLOWr 0.3.4's E_T_mix.
     *
     * @param g
     * @param mu
     * @param pi
     */
-  def E_T_mix(g: (Double) => Double, mu: Double, pi: Double, fisher: Boolean): Double = {
-    val e0 = if(fisher) 2.0 else E_gX_p(g, 0.0, 1)
-    if (pi == 0)
-      return e0
-    return pi * E_gX_p(g, mu, 1) + (1.0 - pi) * e0
+  def E_T_mix(g: (Double) => Double, mu: Double, pi: Double): Double = {
+    return pi * E_gX_p(g, mu, 1) + (1.0 - pi) * E_gX_p(g, 0.0, 1)
   }
 
   def getSigma(g: (Double) => Double, mu: BDV[Double], pi: BDV[Double], M: BDM[Double], h1: Boolean = false): BDM[Double] = {
@@ -463,12 +529,188 @@ object OptimalWeights {
     return covMT_mix(g, nullMu, nullMu, M)
   }
 
-  def getR(g: (Double) => Double, mu: BDV[Double], pi: BDV[Double], fisher: Boolean): BDV[Double] = {
+  def getR(g: (Double) => Double, mu: BDV[Double], pi: BDV[Double]): BDV[Double] = {
     val n = mu.size
-    val e0 = E_T_mix(g, 0.0, 0.0, fisher)
-    return BDV.tabulate(n){(i) => E_T_mix(g, mu(i), pi(i), fisher) -  e0}
+    val e0 = E_T_mix(g, 0.0, 0.0)
+    return BDV.tabulate(n){(i) => E_T_mix(g, mu(i), pi(i)) -  e0}
   }
 
+  // -------------------------------------------------------------------------------------------
+  // Quadrature and Hermite expansion. Mirrors GLOWr 0.3.4's R/optimal_weights_quadrature.R:
+  // every one-dimensional integral against the standard normal density uses one composite
+  // 10-point Gauss-Legendre rule on [-12, 12] with panels of width 0.1, cut where the argument
+  // of g is zero (the kink of the two-sided transforms); the Hermite functions come from their
+  // three-term recurrence; each distinct (mean, scale) pair is integrated once per call.
+  // -------------------------------------------------------------------------------------------
 
+  /** Gauss-Legendre nodes and weights on [-1, 1] by Golub-Welsch: the nodes are the eigenvalues
+    * of the symmetric tridiagonal Jacobi matrix of the Legendre recurrence (off-diagonal
+    * i / sqrt(4 i^2 - 1)), the weights twice the squared first components of its eigenvectors.
+    * Mirrors GLOWr's .gl_rule. */
+  private def glRule(m: Int): (Array[Double], Array[Double]) = {
+    val J = BDM.zeros[Double](m, m)
+    for (i <- 1 until m) {
+      val b = i / math.sqrt(4.0 * i * i - 1.0)
+      J(i - 1, i) = b
+      J(i, i - 1) = b
+    }
+    val es = eigSym(J)
+    val order = (0 until m).sortBy(k => es.eigenvalues(k))
+    (order.map(k => es.eigenvalues(k)).toArray,
+     order.map(k => 2.0 * es.eigenvectors(0, k) * es.eigenvectors(0, k)).toArray)
+  }
 
+  /** The 10-point rule, computed once. */
+  private lazy val GL10: (Array[Double], Array[Double]) = glRule(10)
+
+  /**
+    * Nodes and weights of the composite rule for integrals against the standard normal density
+    * (the density is not included; the caller multiplies by it). [-lim, lim] is cut into panels
+    * of width at most `width`, with a cut at `cut` when it lies inside, so a kink of the
+    * integrand at `cut` falls on a panel boundary; each panel carries the 10-point rule. The
+    * normal mass outside [-12, 12] is 3.6e-33. Mirrors GLOWr's .normal_nodes.
+    *
+    * @param cut the point to cut at; NaN or infinite for no cut
+    */
+  def normalNodes(cut: Double, lim: Double = 12.0, width: Double = 0.1): (Array[Double], Array[Double]) = {
+    val (rx, rw) = GL10
+    val m = rx.length
+    def panel(a: Double, b: Double): (Array[Double], Array[Double]) = {
+      val k = math.max(1, math.ceil((b - a) / width).toInt)
+      val by = (b - a) / k
+      val edges = Array.tabulate(k + 1)(i => if (i == k) b else a + i * by)  // R's seq(a, b, length.out = k + 1)
+      val x = new Array[Double](k * m)
+      val w = new Array[Double](k * m)
+      for (p <- 0 until k) {
+        val h = (edges(p + 1) - edges(p)) / 2.0
+        val c0 = (edges(p + 1) + edges(p)) / 2.0
+        for (j <- 0 until m) {
+          x(p * m + j) = rx(j) * h + c0
+          w(p * m + j) = rw(j) * h
+        }
+      }
+      (x, w)
+    }
+    if (!cut.isNaN && !cut.isInfinite && cut > -lim && cut < lim) {
+      val (lx, lw) = panel(-lim, cut)
+      val (hx, hw) = panel(cut, lim)
+      (lx ++ hx, lw ++ hw)
+    } else panel(-lim, lim)
+  }
+
+  /** Hermite moments of g(mu + s U), U ~ N(0, 1), for one (mu, s): b holds b_k = E[g he_k(U)],
+    * k = 0..K (so b(0) = E[g]), with he_k = He_k / sqrt(k!); variance is E[(g - E g)^2]. */
+  case class HermiteMoments(b: Array[Double], eg2: Double, variance: Double)
+
+  /**
+    * The Hermite moments of g(mu + s U) from one evaluation of g on normalNodes, cut at
+    * u0 = -mu / s where the argument of g is zero. The normalized Hermite functions come from the
+    * forward-stable recurrence he_{k+1}(u) = (u he_k(u) - sqrt(k) he_{k-1}(u)) / sqrt(k + 1),
+    * he_0 = 1, he_1 = u. Mirrors GLOWr's .hermite_moments (with .hermite_functions).
+    *
+    * Validated upstream for the Fisher and polynomial transforms; a g with another kink, a cusp,
+    * a discontinuity or very rapid growth needs its own convergence check.
+    */
+  def hermiteMoments(g: Double => Double, mu: Double, s: Double, K: Int): HermiteMoments = {
+    if (mu.isNaN || mu.isInfinite || s.isNaN || s.isInfinite || s <= 0.0)
+      fatal(s"The mean must be finite and the scale finite and positive (got mu = $mu, s = $s).")
+    val (u, w) = normalNodes(-mu / s)
+    val nNodes = u.length
+    val gx = new Array[Double](nNodes)
+    for (i <- 0 until nNodes) {
+      gx(i) = g(mu + s * u(i))
+      if (gx(i).isNaN || gx(i).isInfinite)
+        fatal(s"The transformation g returned a non-finite value at x = ${mu + s * u(i)} (mu = $mu, s = $s).")
+    }
+    val wphi = Array.tabulate(nNodes)(i => Normal.density(u(i), 0.0, 1.0, false) * w(i))
+    val gw = Array.tabulate(nNodes)(i => gx(i) * wphi(i))
+    def dot(h: Array[Double]): Double = { var acc = 0.0; var i = 0; while (i < nNodes) { acc += h(i) * gw(i); i += 1 }; acc }
+
+    // b_k = sum_i he_k(u_i) g_i wphi_i, carrying he_{k-1} and he_k through the recurrence
+    val b = new Array[Double](K + 1)
+    var prev = Array.fill(nNodes)(1.0)   // he_0
+    b(0) = dot(prev)
+    if (K >= 1) {
+      var cur = u.clone()                 // he_1
+      b(1) = dot(cur)
+      for (k <- 1 until K) {
+        val sk = math.sqrt(k.toDouble)
+        val sk1 = math.sqrt(k + 1.0)
+        val next = Array.tabulate(nNodes)(i => (u(i) * cur(i) - sk * prev(i)) / sk1)
+        prev = cur
+        cur = next
+        b(k + 1) = dot(cur)
+      }
+    }
+    var eg2 = 0.0
+    var variance = 0.0
+    for (i <- 0 until nNodes) {
+      eg2 += gx(i) * gx(i) * wphi(i)
+      variance += (gx(i) - b(0)) * (gx(i) - b(0)) * wphi(i)
+    }
+    if (b.exists(x => x.isNaN || x.isInfinite) || eg2.isNaN || eg2.isInfinite || variance.isNaN || variance.isInfinite)
+      fatal(s"A moment of g(mu + s U) is not finite (mu = $mu, s = $s): the transformation grows too fast " +
+        "for the fixed quadrature domain.")
+    HermiteMoments(b, eg2, variance)
+  }
+
+  /** The Hermite moments for vectors of means and scales: b is (K + 1) x n, row k holding order
+    * k; variance is indexed like mu. */
+  case class HermiteTable(b: BDM[Double], variance: BDV[Double])
+
+  /** hermiteMoments for every (mu_i, s_i), each distinct pair integrated once (pairs matched
+    * exactly, as GLOWr's .hermite_table matches them at 17 significant digits). */
+  def hermiteTable(g: Double => Double, mu: BDV[Double], s: BDV[Double], K: Int): HermiteTable = {
+    val n = mu.length
+    if (s.length != n) fatal(s"mu and s must have the same length: $n, ${s.length}")
+    val seen = scala.collection.mutable.HashMap.empty[(Double, Double), HermiteMoments]
+    val b = BDM.zeros[Double](K + 1, n)
+    val variance = BDV.zeros[Double](n)
+    for (i <- 0 until n) {
+      val m = seen.getOrElseUpdate((mu(i), s(i)), hermiteMoments(g, mu(i), s(i), K))
+      for (k <- 0 to K) b(k, i) = m.b(k)
+      variance(i) = m.variance
+    }
+    HermiteTable(b, variance)
+  }
+
+  /** Mehler's sum S_ij = sum over k in ORD of C(k, i) D(k, j) M_ij^k, the powers of M accumulated
+    * elementwise. With C = D coefficient tables and M a correlation matrix this is the truncated
+    * covariance of the transformed variables. Mirrors GLOWr's .mehler_sum. */
+  def mehlerSum(C: BDM[Double], D: BDM[Double], M: BDM[Double], ORD: Seq[Int]): BDM[Double] = {
+    val n = C.cols
+    val out = BDM.zeros[Double](n, n)
+    var Mk = BDM.ones[Double](n, n)
+    val ord = ORD.toSet
+    for (k <- 1 to ORD.max) {
+      Mk = Mk *:* M
+      if (ord.contains(k)) out += (C(k, ::).t * D(k, ::)) *:* Mk
+    }
+    out
+  }
+
+  /** ORD as sorted distinct positive integers; mirrors GLOWr's .check_ord. */
+  private def checkOrd(ORD: Seq[Int]): Seq[Int] = {
+    if (ORD.isEmpty || ORD.exists(_ < 1))
+      fatal("ORD must be a vector of positive integers (the orders of the Hermite expansion)")
+    ORD.distinct.sorted
+  }
+
+  /** Stop if M is not positive semi-definite (smallest eigenvalue below -1e-10), as GLOWr's
+    * check_positive_definite stops; its warning below +1e-10 is not ported. */
+  private def checkPSD(M: BDM[Double]): Unit = {
+    val minEig = min(eigSymD.justEigenvalues(M))
+    if (minEig < -1e-10)
+      fatal(f"Correlation matrix M must be positive semi-definite. Minimum eigenvalue: $minEig%.2e")
+  }
 }
+
+/** The moments behind the non-Burden optimal weights (OptimalWeights.optimalWeightMoments). */
+case class OptimalWeightMoments(
+  rN: BDV[Double],
+  sigmaBEN: BDM[Double],
+  sigmaAPEN: BDM[Double],
+  rSparse: BDV[Double],
+  sigmaBESparse: BDM[Double],
+  sigmaAPESparse: BDM[Double]
+)

@@ -6,6 +6,10 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar
 Last update (latest update first):
+  Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-02: BSF_test calls optimalWeightsM by name; its
+    `fisher` parameter is gone (GLOWr 0.3.4 port: the null mean is integrated). The comment
+    that the Fisher weights "do not seem to be very accurate" is removed: the inaccuracy was
+    GLOWr's integrate(), fixed in GLOWr 0.3.4, which this port mirrors.
   Claude Code (Opus 5), prompted by VPanwar, 2026-09-09: Fixed three defects found by the group-B
     golden-fixture suite (packages/glow-core in the GLOWh repo). (B1) calcu_SgZ_p had no all-zero
     weight guard, so a degenerate weight vector reached pGFisherHyb and threw
@@ -385,15 +389,14 @@ object FuncCalcuCombTests {
     // SKAT Test
     val gSKAT: Double => Double = x => x * x
     val statDFSKAT = 1.0
-    val wtsOptSKAT = OptimalWeights.optimalWeightsM(gSKAT, Bstar, PI, M, false, false, true)
+    val wtsOptSKAT = OptimalWeights.optimalWeightsM(gSKAT, Bstar, PI, M, burden = false, forcePositiveWeights = true)
     val WT_opt_skat = BDM.vertcat(wtsOptSKAT, wtsEqu)
     val DF_opt_skat = BDM.fill(WT_opt_skat.rows, 1)(statDFSKAT)
 
     // Fisher Test
     val gFisher: Double => Double = x => g_GFisher_two(x, 2.0)
     val statDFFisher = 2.0
-    // the wtsOptFisher does not seem to be very accurate compared to R as of now.
-    val wtsOptFisher = OptimalWeights.optimalWeightsM(gFisher, Bstar, PI, M, false, true, true) // mae is 1.86e-4
+    val wtsOptFisher = OptimalWeights.optimalWeightsM(gFisher, Bstar, PI, M, burden = false, forcePositiveWeights = true)
     val WT_opt_fisher = BDM.vertcat(wtsOptFisher, wtsEqu)
     val DF_opt_fisher = BDM.fill(WT_opt_fisher.rows, 1)(statDFFisher)
 

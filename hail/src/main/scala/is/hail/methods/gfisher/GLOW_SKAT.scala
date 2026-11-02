@@ -5,6 +5,9 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar
 Last update (latest update first):
+  Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-02: optimalWeightsM no longer has a `fisher`
+    parameter (GLOWr 0.3.4 port: the null mean is always integrated); the call passes its
+    arguments by name, so no positional flag can land on forcePositiveWeights.
   Claude Code (Opus 5), prompted by VPanwar, 2026-09-09: Fixed defect E1, found by the group-E
     golden-fixture suite (packages/glow-core in the GLOWh repo). optimalWeightsM was called with
     fisher = true, the flag that replaces the integrated null mean E_gX_p(g, 0, 1, 1) with the
@@ -54,15 +57,10 @@ object GLOW_SKAT {
         // Conduct SKAT Test and get optimal weights
         val gSKAT: Double => Double = x => x * x
         val statDFSKAT = 1.0
-        // fisher = FALSE. The sixth argument replaces the integrated null mean
-        // E_gX_p(g, 0, 1, 1) with the constant 2.0, which is the null mean of the
-        // Fisher transform (a chi-square quantile with 2 df) and NOT of SKAT's
-        // g(x) = x^2, whose null mean is 1. Passing true here made every SKAT
-        // weight -- and the statistic built on it -- wrong by 1.3% to 26%.
-        // BSF_test (Func_Calcu_Comb_Tests.scala:388) always made this call
-        // correctly; this file did not. R has no such flag: Optimal_Weights_M
-        // integrates the null mean for whatever g it is given.
-        val wtsOptSKAT = OptimalWeights.optimalWeightsM(gSKAT, Bstar, PI, M, false, false)
+        // Arguments by name. optimalWeightsM integrates the null mean E[g(Z_0)] for whatever g
+        // it is given, as GLOWr's Optimal_Weights_M does.
+        val wtsOptSKAT = OptimalWeights.optimalWeightsM(gSKAT, Bstar, PI, M, burden = false,
+          forcePositiveWeights = true)
         val WT_opt_skat = BDM.vertcat(wtsOptSKAT, wtsEqu)
         val DF_opt_skat = BDM.fill(WT_opt_skat.rows, 1)(statDFSKAT)
 

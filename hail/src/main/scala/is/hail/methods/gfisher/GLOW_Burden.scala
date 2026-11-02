@@ -5,6 +5,8 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar
 Last update (latest update first):
+  Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-02: optimalWeightsM no longer has a `fisher`
+    parameter (GLOWr 0.3.4 port); the call passes its arguments by name.
   Claude Code (Opus 5), prompted by VPanwar, 2026-09-09: Passed fisher = false to optimalWeightsM.
     The previous `true` was wrong for the same reason as defect E1 in GLOW_SKAT.scala -- the flag
     substitutes the Fisher transform's null mean of 2.0 -- but harmless here, since burden = true
@@ -50,12 +52,9 @@ object GLOW_Burden {
         // Conduct Burden Test and get optimal weights
         val gBurden: Double => Double = x => x
         val statDFBurden = Double.PositiveInfinity
-        // fisher = FALSE. Burden's g(x) = x has null mean 0, not 2, so `true`
-        // was wrong here as well -- harmlessly today, because burden = true
-        // short-circuits to optimalWeightsM_Burden before the flag is read, but
-        // one refactor away from mattering. Corrected with E1; the group-E
-        // fixtures confirm GLOW_Burden's output is unchanged.
-        val wtsOptBurden = OptimalWeights.optimalWeightsM(gBurden, Bstar, PI, M, true, false)
+        // burden = true short-circuits to optimalWeightsM_Burden's closed form.
+        val wtsOptBurden = OptimalWeights.optimalWeightsM(gBurden, Bstar, PI, M, burden = true,
+          forcePositiveWeights = true)
         val WT_opt_burden = BDM.vertcat(wtsOptBurden, wtsEqu)
         val DF_opt_burden = BDM.fill(WT_opt_burden.rows, 1)(statDFBurden)
 
