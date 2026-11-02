@@ -5,6 +5,13 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Peter Howell and Kylie Hoar
 Last update (latest update first):
+  Claude Code (Opus 5.5), prompted by VPanwar, 2026-10-28: pGFisherHyb and pGFisherGB no longer
+    modify the caller's weight vector. Both normalized with `w := w / sum(w)`, which in Breeze
+    writes through to the caller's array -- and, from StatOGFisher, through a row view into the
+    caller's weight MATRIX. Inert at the three call sites that existed, each for an incidental
+    reason, but live for any new caller. Each now normalizes into a local wN. No value changes:
+    the same arithmetic on the same numbers. Defect D1 of GLOWh's
+    0project/ai-reports/2026-10-19-track-c-outcome-probe-and-discrepancies.md section 7.
   KHoar 2025-04-23: Re-formatted docstrings and added comments
   PHowell 2025-02-26: Allow double degrees of freedom
 */
@@ -87,11 +94,12 @@ object PGFisher {
     w: BDV[Double],
     M: BDM[Double]
   ): Double = {
-    w := w / sum(w)
-    val GM: BDM[Double] = GFisherGM.getGFisherGM(df, w, M, false)
-    val mu: Double = w dot convert(df, Double)
+    // Normalized into a NEW vector: `w := w / sum(w)` wrote through to the caller's weights.
+    val wN: BDV[Double] = w / sum(w)
+    val GM: BDM[Double] = GFisherGM.getGFisherGM(df, wN, M, false)
+    val mu: Double = wN dot convert(df, Double)
     val sigma2: Double = sum(GM)
-    val lam: BDV[Double] = GFisherLambda.getGFisherLambda(df, w, M, GM)
+    val lam: BDV[Double] = GFisherLambda.getGFisherLambda(df, wN, M, GM)
     val (c2: Double, c3: Double, c4: Double) = (sum(lam ^:^ 2.0), sum(lam ^:^ 3.0), sum(lam ^:^ 4.0))
     val gm: Double = (math.sqrt(8.0) * c3) / math.pow(c2, 3.0/2.0)
     val kp: Double = 12.0 * c4 / math.pow(c2, 2.0) + 3.0
@@ -186,9 +194,10 @@ object PGFisher {
     M: BDM[Double],
     oneSided: Boolean
   ): Double = {
-    w := w / sum(w)
-    val GM: BDM[Double] = GFisherGM.getGFisherGM(df, w, M, oneSided)
-    val mu: Double = w dot convert(df, Double)
+    // Normalized into a NEW vector: `w := w / sum(w)` wrote through to the caller's weights.
+    val wN: BDV[Double] = w / sum(w)
+    val GM: BDM[Double] = GFisherGM.getGFisherGM(df, wN, M, oneSided)
+    val mu: Double = wN dot convert(df, Double)
     val sigma2: Double = sum(GM)
     val a: Double = math.pow(mu, 2.0) / sigma2
     val x: Double = (q - mu) * math.sqrt(a) / math.sqrt(sigma2) + a
