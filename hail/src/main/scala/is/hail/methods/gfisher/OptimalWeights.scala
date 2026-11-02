@@ -8,6 +8,13 @@
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
   * @author Peter Howell
   * Last update (latest update first):
+  *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-10-28: optimalWeightsM passed the VARIANCE
+  *     diag(M + MVM) to getRTilde, whose argument is a standard deviation (E_gX_p integrates
+  *     against N(mu, sd)). It now passes sqrt(diag(M + MVM)). This changes r_tilde and so both
+  *     normal-approximation schemes, BE_N and APE_N; BE_N is now complete, APE_N also needs the
+  *     covM_gXgY standardization (GLOWh port plan change (c)). Upstream fix: GLOWr 0.3.3. See
+  *     GLOWh's 0project/ai-reports/2026-10-25-port-plan.md section 3a.3.
+  *     Mirrors: GLOWr 0.3.3 Optimal_Weights_M (SD_tilde, get_r_tilde).
   *   Claude Code (Opus 5), prompted by VPanwar, 2026-09-09: optimalWeightsG now builds M with
   *     cov2corZeroSafe. It is currently dead code (zero call sites), but the unguarded cov2cor
   *     would put NaN into M, and optimalWeightsM propagates that to EVERY weight through
@@ -100,7 +107,12 @@ object OptimalWeights {
 
     // Normal approximation
 
-    val rTilde: BDV[Double] = getRTilde(g, mmu, diag(M + MVM), fisher) // off by average of 2.57e-5 :(
+    // Under H1 the marginal Z-scores are N(MMU, Sigma_tilde) with Sigma_tilde = M + MVM.
+    // getRTilde takes the STANDARD DEVIATION of each Z_i, so pass sqrt of the diagonal,
+    // not the variance (GLOWr 0.3.3: SD_tilde <- sqrt(diag(Sigma_tilde))).
+    val sigmaTilde: BDM[Double] = M + MVM
+    val sdTilde: BDV[Double] = sqrt(diag(sigmaTilde))
+    val rTilde: BDV[Double] = getRTilde(g, mmu, sdTilde, fisher)
 
     //Bahadur efficiency (BE)
     val sigmaBETilde: BDM[Double] = covM_gXgY(g, BDV.zeros[Double](n), BDV.zeros[Double](n), M) // accurate to 1e-16
