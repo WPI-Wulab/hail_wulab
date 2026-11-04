@@ -8,6 +8,9 @@
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
   * @author Peter Howell
   * Last update (latest update first):
+  *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-03: the core no longer imports Hail:
+  *     eigSymD is the method package's copy and fatal/warn come from GlowErrors (stage 1 of GLOWh's
+  *     0project/glow-hail-refactor-plan.md). No change to what is computed.
   *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-02: ported GLOWr 0.3.4's quadrature and
   *     Hermite expansion (ZWuLab/GLOWr tag v0.3.4, R/optimal_weights.R and
   *     R/optimal_weights_quadrature.R). Every one-dimensional integral against the normal density
@@ -70,8 +73,7 @@
 
 package is.hail.methods.gfisher
 
-import is.hail.stats.eigSymD
-import is.hail.utils.{fatal, warn}
+import is.hail.methods.gfisher.GlowErrors.{fatal, warn}
 
 import breeze.linalg.{DenseVector => BDV, DenseMatrix => BDM, _}
 import breeze.numerics.{abs, sqrt}

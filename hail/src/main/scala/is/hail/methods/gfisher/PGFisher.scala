@@ -5,6 +5,10 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Peter Howell and Kylie Hoar
 Last update (latest update first):
+  Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-03: two implicit Int widenings made
+    explicit (the seed passed to MersenneTwister, the moment order passed to math.pow), for Hail
+    0.2.138's warnings-as-errors build; the same constructor and values as before. Stage 1 of
+    GLOWh's 0project/glow-hail-refactor-plan.md.
   Claude Code (Opus 5.5), prompted by VPanwar, 2026-10-28: pGFisherHyb and pGFisherGB no longer
     modify the caller's weight vector. Both normalized with `w := w / sum(w)`, which in Breeze
     writes through to the caller's array -- and, from StatOGFisher, through a row view into the
@@ -142,7 +146,7 @@ object PGFisher {
       val (nsim, seed) = initializeParams(nsimOpt, seedOpt)
       val rand_mat = if (seed != None) {
         val intSeed: Int = seed.getOrElse(0)
-        val rng: RandomEngine = new MersenneTwister(intSeed)
+        val rng: RandomEngine = new MersenneTwister(intSeed.toLong)
         BDM.tabulate(nsim, n)((_, _) => Normal.random(0.0, 1.0, rng))
       } else {
         // I cannot use jdistlib here because Normal.random requires an rng in order to work properly
@@ -164,7 +168,7 @@ object PGFisher {
         BDM.tabulate(pnull.rows, pnull.cols) { (i, j) => ChiSquare.quantile(1 - pnull(i, j), df(j), false, false) }
       }
       val fisherNull = ppTrans(*, ::).map(row => sum(row *:* w))
-      val MM = (1 to 4).map(k => mean(fisherNull.map(math.pow(_, k))))
+      val MM = (1 to 4).map(k => mean(fisherNull.map(math.pow(_, k.toDouble))))
       val mu = MM(0)
       val sigma2 = (MM(1) - math.pow(MM(0), 2)) * nsim / (nsim - 1).toDouble
       val cmu3 = MM(2) - 3 * MM(1) * MM(0) + 2 * math.pow(MM(0), 3)

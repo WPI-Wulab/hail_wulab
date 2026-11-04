@@ -4,6 +4,9 @@
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
   * @author Peter Howell
   * Last update (latest update first):
+  *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-03: the core no longer imports Hail:
+  *     eigSymD is the method package's copy and fatal come from GlowErrors (stage 1 of GLOWh's
+  *     0project/glow-hail-refactor-plan.md). No change to what is computed.
   *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-10-28: M_tilde is now built from the
   *     covariance of the UNWEIGHTED T_i, as formula (13) specifies, and the weights enter once,
   *     through diag(sqrt(w)). The previous code built it from GM, which already carries the
@@ -20,8 +23,7 @@
 
 package is.hail.methods.gfisher
 
-import is.hail.stats.eigSymD
-import is.hail.utils.fatal
+import is.hail.methods.gfisher.GlowErrors.fatal
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
 import breeze.numerics.{abs, sqrt, signum}
 

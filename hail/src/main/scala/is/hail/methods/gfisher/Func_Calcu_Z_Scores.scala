@@ -6,6 +6,10 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar and Peter Howell
 Last update (latest update first):
+  Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-03: two lint fixes for Hail 0.2.138's
+    warnings-as-errors build, no change to what is computed: the SPA test grid's Double range is
+    now an integer range times 0.5 (same values), and two unused exception bindings are
+    wildcards. Stage 1 of GLOWh's 0project/glow-hail-refactor-plan.md.
   Claude Code (Opus 5.5), prompted by VPanwar, 2026-10-21: getZ_marg_score_binary_SPA now returns its
     two matrices under "M_Z" and "M_s" instead of "M" and "GHG". The four GLOW_* wrappers read
     "M_Z" / "M_s", so with the old names the SPA branch of GLOW.scala threw "key not found: M_Z" on
@@ -389,8 +393,11 @@ object FuncCalcuZScores {
     var rep = 0           // Iteration counter
     
     // Create exponentially spaced positive and negative test points
-    val positiveT = (-2.0 to 10.0 by 0.5).map(x => math.pow(2, x))
-    val negativeT = (-2.0 to 10.0 by 0.5).map(x => -math.pow(2, x))
+    // Exponents -2.0, -1.5, ..., 10.0, as integers times 0.5: multiples of 0.5 are exact in binary,
+    // so these are the same doubles the former Double range (deprecated; removed in Scala 2.13) gave.
+    val exponents = (-4 to 20).map(_ * 0.5)
+    val positiveT = exponents.map(x => math.pow(2, x))
+    val negativeT = exponents.map(x => -math.pow(2, x))
     val tArray = (positiveT ++ negativeT :+ 0.0).distinct.sorted.toArray
     val t = BDV(tArray)   // Final test grid for evaluating function
 
@@ -717,14 +724,14 @@ object FuncCalcuZScores {
         p1 = try {
           Some(getSaddleProb(outUni1._1, mu, g, q, logP, muNB, gNB, naMu, naSigma))
         } catch {
-          case e: Exception =>
+          case _: Exception =>
             if (logP) Some(pvalNoadj - Math.log(2))
             else Some(pvalNoadj / 2)
         }
         p2 = try {
           Some(getSaddleProb(outUni2._1, mu, g, qinv, logP, muNB, gNB, naMu, naSigma))
         } catch {
-          case e: Exception =>
+          case _: Exception =>
             if (logP) Some(pvalNoadj - Math.log(2))
             else Some(pvalNoadj / 2)
         }
