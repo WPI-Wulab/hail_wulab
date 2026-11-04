@@ -4,6 +4,8 @@
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
   * @author Peter Howell and Kylie Hoar
   * Last update (latest update first):
+  *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-03: removed the unused imports DiffFunction and
+  *     minimize (log_reg_fit uses IRLS, not L-BFGS, since 2026-09-09). No change to what is computed.
   *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-03: the core no longer imports Hail:
   *     eigSymD is the method package's copy and fatal come from GlowErrors (stage 1 of GLOWh's
   *     0project/glow-hail-refactor-plan.md). No change to what is computed.
@@ -49,7 +51,6 @@ import is.hail.methods.gfisher.GlowErrors.fatal
 
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
 import breeze.numerics.{abs, sqrt, sigmoid}
-import breeze.optimize.{DiffFunction, minimize}
 import net.sourceforge.jdistlib.{ChiSquare, Normal}
 
 package object gfisher {

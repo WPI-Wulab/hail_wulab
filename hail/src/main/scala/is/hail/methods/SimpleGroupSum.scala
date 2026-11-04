@@ -9,7 +9,7 @@ import is.hail.stats.RegressionUtils
 import is.hail.types.virtual.{MatrixType, TFloat64, TStruct, TableType}
 import is.hail.utils._
 
-import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
+import breeze.linalg.{DenseVector => BDV, _}
 // import breeze.numerics._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Row

@@ -4,6 +4,8 @@
            calculation under dependence." Biometrics 79.2 (2023): 1159-1172.
   * @author Peter Howell
   * Last update (latest update first):
+  *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-03: removed the unused import of Breeze's abs (the code uses math.abs since the 2026-10-28 M_tilde fix). No
+  *     change to what is computed.
   *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-03: the core no longer imports Hail:
   *     eigSymD is the method package's copy and fatal come from GlowErrors (stage 1 of GLOWh's
   *     0project/glow-hail-refactor-plan.md). No change to what is computed.
@@ -25,7 +27,7 @@ package is.hail.methods.gfisher
 
 import is.hail.methods.gfisher.GlowErrors.fatal
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV, _}
-import breeze.numerics.{abs, sqrt, signum}
+import breeze.numerics.{sqrt, signum}
 
 // import net.sourceforge.jdistlib.{ChiSquare, Normal}
 
