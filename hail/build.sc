@@ -91,6 +91,8 @@ object Deps {
     val io = ivy"commons-io:commons-io:2.11.0"
     val lang3 = ivy"org.apache.commons:commons-lang3:3.12.0"
     val codec = ivy"commons-codec:commons-codec:1.15"
+    // glowcore only, compile time: the version Spark 3.5 ships, which provides it at run time
+    val math3 = ivy"org.apache.commons:commons-math3:3.6.1"
   }
 
   object Spark {
@@ -172,7 +174,7 @@ trait HailScalaModule extends SbtModule with ScalafmtModule with ScalafixModule 
 }
 
 object main extends RootModule with HailScalaModule { outer =>
-  override def moduleDeps: Seq[JavaModule] = Seq(memory)
+  override def moduleDeps: Seq[JavaModule] = Seq(memory, glowcore)
 
   override def resources: T[Seq[PathRef]] = Seq(
     PathRef(millSourcePath / "src" / "main" / "resources"),
@@ -266,6 +268,44 @@ object main extends RootModule with HailScalaModule { outer =>
     override def sources: T[Seq[PathRef]] = T.sources {
       Seq(PathRef(this.millSourcePath / os.up / "src" / debugOrRelease() / "java"))
     }
+  }
+
+  /** glow-core: the GLOW numerical core (GFisher, optimal weights, the GLOW tests, and
+    * the quadrature in GaussKronrod.java / Quadrature.java), in `hail/glow-core/`.
+    *
+    * It depends on NO Hail code: only Breeze, jdistlib, commons-math3 and netlib. The
+    * adapters that connect it to Hail (methods/gfisher/GFisher.scala, GLOW.scala,
+    * PrepData.scala, methods/SimpleGroupSum.scala) stay in `main`, which depends on this
+    * module as it does on `memory`. Package names are unchanged (is.hail.methods.gfisher,
+    * is.hail.GaussKronrod, is.hail.Quadrature), so no import changes anywhere.
+    *
+    * Compiler settings and plugin are main's (HailScalaModule, better-monadic-for), so the
+    * code is compiled as it was inside `main`. Dependencies mirror what `main` supplies to
+    * these files: Breeze (with netlib, transitively) and commons-math3 at compile time
+    * only -- at run time Breeze comes through main's breeze-natives and commons-math3 from
+    * Spark -- and jdistlib bundled, with main's exclusions. `assembly` (the wheel's jar)
+    * takes this module's classes in and applies main's Breeze relocation to them;
+    * `writeRunClasspath` (the dev install) lists its class directory, as for `memory`.
+    *
+    * Last update (latest update first):
+    *   2026-11-03 Claude Code (Opus 5.5), prompted by VPanwar: added -- stage 2 of GLOWh
+    *     0project/glow-hail-refactor-plan.md (split glow-core into a module of the fork).
+    */
+  object glowcore extends HailScalaModule {
+    override def millSourcePath: os.Path = outer.millSourcePath / "glow-core"
+
+    override def ivyDeps: T[Agg[Dep]] = Agg(
+      Deps.jdistlib.excludeOrg("*")
+    )
+
+    override def compileIvyDeps: T[Agg[Dep]] = Agg(
+      Deps.Breeze.core,
+      Deps.Commons.math3,
+    )
+
+    override def scalacPluginIvyDeps: T[Agg[Dep]] = Agg(
+      Deps.Plugins.betterModadicFor
+    )
   }
 
   object test extends HailTests {
