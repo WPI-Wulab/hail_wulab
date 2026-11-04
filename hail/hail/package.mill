@@ -31,6 +31,8 @@ trait RootHailModule extends CrossScalaModule, HailScalaModule:
     Seq(
       build.hail.utils(crossValue),
       build.hail.memory(if buildMode == CI then "debug" else "release"),
+      // The GLOW numerical core (hail/hail/glow-core); the adapters in this module call it.
+      build.hail.`glow-core`(crossValue),
     )
     
   override def resources: T[Seq[PathRef]] =

@@ -1,0 +1,48 @@
+package build.hail.`glow-core`
+
+/**
+  * The GLOW numerical core: GFisher, the GLOW tests and their p-value calculations (the 22 files
+  * under src/). It has no dependency on the Hail module, so it compiles, and is tested in GLOWh's
+  * packages/glow-core, without Spark or Hail. The Hail module lists it in moduleDeps, as it lists
+  * utils and memory; the adapters (methods/gfisher/{GFisher,GLOW,PrepData}.scala) stay in Hail.
+  * Shaping follows hail/hail/utils: cross-built over the Scala versions the root module is.
+  * Dependencies are the ones the root module gives these files: jdistlib bundled (excludeOrg("*")
+  * as there), Breeze 1.1 (netlib with it) and commons-math3 3.6.1 at compile time only, since
+  * they reach the jar through the root module, whose assembly relocates Breeze.
+  * Last update (latest update first):
+  *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-03: created, from build.sc's glowcore
+  *     module at fork 8cd5f0e44 (stage 3b of GLOWh's 0project/glow-hail-refactor-plan.md).
+  */
+
+import mill.T
+import mill.scalalib.{CrossScalaModule, Dep}
+
+import build.Settings
+import build.HailScalaModule
+
+import millbuild.SupportedScalaVersions
+import millbuild.MvnCoordinate.*
+
+object `package` extends mill.api.Cross[GlowCore](SupportedScalaVersions)
+trait GlowCore extends HailScalaModule, CrossScalaModule:
+  override def enableBsp: Boolean =
+    millbuild.BuildConfig.bspScalaVersion == crossValue
+
+  override def crossScalaVersion: String =
+    Settings.scalaMinorVersions(crossValue)
+
+  // Bundled into the jar: the distributions (ChiSquare, Normal, ...) the core evaluates.
+  override def mvnDeps: T[Seq[Dep]] =
+    Seq[Dep](
+      (`jdistlib` :: "0.4.5").excludeOrg("*"),
+    )
+
+  // Compile time only, at the root module's versions; the root module ships them.
+  override def compileMvnDeps: T[Seq[Dep]] =
+    Seq[Dep](
+      `breeze` :: "1.1",
+      `commons-math3` :: "3.6.1",
+    )
+
+  override def scalacPluginMvnDeps: T[Seq[Dep]] =
+    super.scalacPluginMvnDeps() :+ (`better-monadic-for` :: "0.3.1")

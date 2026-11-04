@@ -1,0 +1,113 @@
+/**
+  * Last update (latest update first):
+  *   Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-04: ported to the Hail 0.2.138 API (stage 3c of
+  *     GLOWh's 0project/glow-hail-refactor-plan.md): groupAndImputeMean takes the ExecuteContext and
+  *     broadcasts through its backend, as HailContext is gone; RVD.mapPartitions' closure takes the
+  *     HailClassLoader first; FastSeq and IntArrayBuilder from is.hail.collection; `override` on
+  *     execute and preservesPartitionCounts.
+  */
+package is.hail.methods
+
+import is.hail.annotations.{Annotation, UnsafeRow}
+import is.hail.backend.ExecuteContext
+import is.hail.collection.{FastSeq, IntArrayBuilder}
+import is.hail.expr.ir.{MatrixValue, TableValue}
+import is.hail.expr.ir.functions.MatrixToTableFunction
+import is.hail.stats.RegressionUtils
+import is.hail.types.virtual.{MatrixType, TFloat64, TStruct, TableType}
+import is.hail.utils._
+
+import breeze.linalg.{DenseVector => BDV, _}
+// import breeze.numerics._
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.Row
+
+
+/**
+  * A simple example of grouping by something and then summing the values.
+  *
+  * @param keyField
+  * @param xField
+  */
+case class SimpleGroupSum(
+  keyField: String,
+  xField: String
+) extends MatrixToTableFunction {
+
+  override def typ(childType: MatrixType): TableType = {
+    val keyType = childType.rowType.fieldType(keyField)
+    val mySchema = TStruct(
+      ("id", keyType),
+      ("my_sum", TFloat64)
+    )
+    TableType(mySchema, FastSeq("id"), TStruct.empty)
+  }
+
+  override def preservesPartitionCounts: Boolean = false
+
+  override def execute(ctx: ExecuteContext, mv: MatrixValue): TableValue = {
+    // val backend = HailContext.backend
+
+    val groupedObj = groupAndImputeMean(ctx, mv)
+    val rddObj = groupedObj.map{case (key, vals) =>
+      val X = ArrayToMatrix.arrayToMatrix(vals.toArray)
+      // println("A")
+      // println("B")
+      // println(s"Processing group: $key on thread: ${Thread.currentThread().getName}")
+      Thread.sleep(5000)
+      Row(key, sum(X))
+    }
+    val mtyp = typ(mv.typ)
+    TableValue(ctx, mtyp.rowType, mtyp.key, rddObj)
+
+  }
+
+  /**
+    * groups a MatrixTable, collecting the x variable into an iterable object (CondensedBuffer)
+    *
+    * @param mv hail MatrixTable
+    */
+  def groupAndImputeMean(ctx: ExecuteContext, mv: MatrixValue): RDD[(Annotation, Iterable[BDV[Double]])] = {
+    val ncol = mv.nCols
+    val completeColIdx = (0 until ncol).toArray
+    val completeColIdxBc = ctx.backend.broadcast(completeColIdx)
+    val fullRowType = mv.rvRowPType
+    val keyStructField = fullRowType.field(keyField)
+    val keyIndex = keyStructField.index
+    val keyType = keyStructField.typ
+
+    val entryArrayType = mv.entryArrayPType
+    val entryArrayIdx = mv.entriesIdx
+
+    val entryType = mv.entryPType
+    val fieldIdx = entryType.fieldIdx(xField)
+    mv.rvd.mapPartitions { (_, ctx, it) =>
+      it.flatMap { ptr =>
+        val keyIsDefined = fullRowType.isFieldDefined(ptr, keyIndex)
+
+        if (keyIsDefined) {
+          val key = Annotation.copy(
+            keyType.virtualType,
+            UnsafeRow.read(keyType, ctx.r, fullRowType.loadField(ptr, keyIndex)),
+          )
+          val data = new Array[Double](ncol)
+
+          RegressionUtils.setMeanImputedDoubles(
+            data,
+            0,
+            completeColIdxBc.value,
+            new IntArrayBuilder(),
+            ptr,
+            fullRowType,
+            entryArrayType,
+            entryType,
+            entryArrayIdx,
+            fieldIdx,
+          )
+          Some(key -> BDV[Double](data))
+        } else None
+      }
+    }.groupByKey()
+  }
+
+}

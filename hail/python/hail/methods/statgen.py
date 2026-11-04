@@ -13,10 +13,14 @@ from hail.expr import (
     StructExpression,
     analyze,
     expr_any,
+    expr_array,
     expr_call,
     expr_float64,
+    expr_int32,
+    expr_int64,
     expr_locus,
     expr_numeric,
+    expr_oneof,
     matrix_table_source,
     raise_unless_column_indexed,
     raise_unless_entry_indexed,
@@ -2870,7 +2874,7 @@ def _logistic_skat(
 def skat(
     key_expr,
     weight_expr,
-    y,
+    y,  ##[ZWu: When implementing GLOW pipeline for genotype-phenotype data, we can use the similar python function/interface setting, including y, x, covariates, logistic.]
     x,
     covariates,
     logistic: Union[bool, Tuple[int, float]] = False,
@@ -3090,6 +3094,223 @@ def skat(
         'logistic_tolerance': tolerance,
     }
 
+    return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
+
+
+@typecheck(
+    key_expr=expr_any,
+    x=expr_float64,
+)
+def simple_group_sum(key_expr, x) -> Table:
+    mt = matrix_table_source('simple_sum/x', x)
+    raise_unless_entry_indexed('simple_sum/x', x)
+
+    analyze('simple_sum/key_expr', key_expr, mt._row_indices)
+
+    if x in mt._fields_inverse:
+        x_field_name = mt._fields_inverse[x]
+        entry_expr = {}
+    else:
+        x_field_name = Env.get_uid()
+        entry_expr = {x_field_name: x}
+
+    key_field_name = '__key'
+
+    mt = mt._select_all(
+        row_exprs={key_field_name: key_expr},
+        entry_exprs=entry_expr,
+    )
+
+    config = {'name': 'SimpleGroupSum', 'keyField': key_field_name, 'xField': x_field_name}
+    return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
+
+
+@typecheck(
+    key=expr_any,
+    pval=expr_float64,
+    df=expr_oneof(expr_int32, expr_int64, expr_float64),
+    w=expr_float64,
+    genotype=nullable(expr_float64),
+    corr=nullable(expr_array(expr_float64)),
+    corr_idx=nullable(
+        expr_oneof(expr_int32, expr_int64)
+    ),  # Upstream results obtained by Hail's functions could be int32 or int64.
+    method=str,
+    one_sided=bool,
+)
+def gfisher(key, pval, df, w, genotype=None, corr=None, corr_idx=None, method="HYB", one_sided=False):
+    """Run GFisher Analysis on a dataset
+
+    Args:
+        key (expr_any): row expression to group by.
+        pval (expr_float64): row expression of p-values
+        df (expr_int32): row expression of degrees of freedom
+        w (expr_float64): row expression of weights
+        genotype (expr_float64, optional): entry expression to calculate correlation of. If not specified, corr and corr_idx must be specified.
+        corr (expr_array, optional): row expression containing rows of the correlation matrix (contains the row of the correlation matrix corresponding to this row's SNP). Requires corr_idx. If not specified, genotype must be specified.
+        corr_idx (expr_int32): row expression containing the index this row corresponds to in the original correlation matrix. If not specified, genotype must be specified.
+        method (str, optional): which method to use. Either "HYB" (default) for moment ratio matching by quadratic approximation, "MR" for simulation-assisted moment ratio matching, or "GB" for Brown's method with calculated variance.
+        one_sided (bool, optional): whether the input p-values were one-sided or not. Defaults to False.
+
+    Returns:
+        hl.Table: table containing the GFisher statistic, pvalue, and the number of rows used in the group
+
+    Examples:
+    ```python
+    hl.reset_global_randomness()
+    mt = hl.balding_nichols_model(1, n_samples=20, n_variants=50)
+    mt = mt.annotate_rows(gene=mt.locus.position // 5)
+    mt = mt.annotate_entries(X=mt.GT.n_alt_alleles())
+    mt = mt.add_row_index()
+    mt = mt.annotate_rows(weight=1.0,
+                        df=hl.literal(list(range(1, 1 + mt.count_rows())))[hl.int32(mt.row_idx)])
+    mt = mt.annotate_cols(phenotype=hl.agg.sum(mt.GT.n_alt_alleles()) - 20 + hl.rand_norm(0, 1))
+    pval_ht = hl.linear_regression_rows(y=mt.phenotype, x=mt.X, covariates=[1.0])
+    row_cor = hl.row_correlation(mt.X)
+    rce = row_cor.to_table_row_major()
+    mt = mt.annotate_rows(row_cor=rce[mt.row_idx].entries, pval=pval_ht[mt.row_key].p_value)
+    hl.gfisher(mt.gene, mt.pval, mt.df, mt.weight, mt.row_cor, mt.row_idx)
+    ```
+    """
+    mt = matrix_table_source("gfisher", key)
+    use_genotype = genotype is not None
+    # FIXME: remove this logic when annotation is better optimized (taken from line 3050 of skat function)
+    # used to name group column in the output table to what it was in the input. Logic taken from line 3050 of skat function
+    key_name_out = mt._fields_inverse[key] if key in mt._fields_inverse else "id"
+    df = hl.float64(df)
+    row_exprs = {'__key': key, '__pvalue': pval, '__weight': w, '__df': df}
+
+    if use_genotype:
+        raise_unless_entry_indexed('gfisher/genotype', genotype)
+        print("Using given genotype to calculate correlation")
+        # FIXME: remove this logic when annotation is better optimized
+        if genotype in mt._fields_inverse:
+            geno_field_name = mt._fields_inverse[genotype]
+            entry_expr = {}
+        else:
+            geno_field_name = Env.get_uid()
+            entry_expr = {geno_field_name: genotype}
+    else:
+        row_exprs['__corr'] = corr
+        row_exprs['__rowIdx'] = corr_idx
+        geno_field_name = "__genotype"
+        entry_expr = {}
+
+    mt = mt._select_all(row_exprs=row_exprs, entry_exprs=entry_expr)
+
+    if method not in ["HYB", "MR", "GB"]:
+        raise ValueError(f'gfisher: method must be one of "HYB", "MR", "GB". received value "{method}"')
+
+    config = {
+        'name': 'GFisher',
+        'keyField': '__key',
+        'keyFieldOut': key_name_out,
+        'pField': '__pvalue',
+        'dfField': '__df',
+        'useGenotype': use_genotype,
+        "genoField": geno_field_name,
+        'weightField': '__weight',
+        'corrField': '__corr',
+        'rowIDXField': '__rowIdx',
+        'method': method,
+        'oneSided': one_sided,
+    }
+    return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
+
+
+# [ZWu: gfisher and ogfisher are similar procedure. Would it be better to combine them?]
+
+
+@typecheck(
+    key=expr_any,
+    pval=expr_float64,
+    df=expr_array(expr_oneof(expr_int32, expr_int64, expr_float64)),
+    w=expr_array(expr_float64),
+    genotype=nullable(expr_float64),
+    corr=nullable(expr_array(expr_float64)),
+    corr_idx=nullable(expr_oneof(expr_int32, expr_int64)),
+    n_tests=int,
+    method=str,
+    one_sided=bool,
+)
+def ogfisher(key, pval, df, w, n_tests, genotype=None, corr=None, corr_idx=None, method="HYB", one_sided=False):
+    """Run GFisher Analysis on a dataset
+
+    Args:
+        key (expr_any): row expression to group by.
+        pval (expr_float64): row expression of p-values
+        df (expr_array(expr_int32)): row expression of degrees of freedom. Each element of the array corresponds to a GFisher test
+        w (expr_array(expr_float64)): row expression of weights. Each element of the array corresponds to a GFisher test
+        genotype (expr_float64, optional): entry expression to calculate correlation of. If not specified, corr and corr_idx must be specified.
+        corr (expr_array): row expression containing rows of the correlation matrix (contains the row of the correlation matrix corresponding to this row's SNP)
+        corr_idx (expr_int32): row expression containing the index this row corresponds to in the original correlation matrix.
+        method (str, optional): which method to use. Either "HYB" (default) for moment ratio matching by quadratic approximation, "MR" for simulation-assisted moment ratio matching, or "GB" for Brown's method with calculated variance.
+        one_sided (bool, optional): whether the input p-values were one-sided or not. Defaults to False.
+
+    Returns:
+        hl.Table: table containing the OGFisher statistic, p-value, and the number of rows used in the group
+
+    Examples:
+    ```python
+    hl.reset_global_randomness()
+    mt = hl.balding_nichols_model(1, n_samples=20, n_variants=50)
+    mt = mt.annotate_rows(gene=mt.locus.position // 5)
+    mt = mt.annotate_entries(X=mt.GT.n_alt_alleles())
+    mt = mt.add_row_index()
+    mt = mt.annotate_rows(weight=1.0,
+                        df=hl.literal(list(range(1, 1 + mt.count_rows())))[hl.int32(mt.row_idx)])
+    mt = mt.annotate_cols(phenotype=hl.agg.sum(mt.GT.n_alt_alleles()) - 20 + hl.rand_norm(0, 1))
+    pval_ht = hl.linear_regression_rows(y=mt.phenotype, x=mt.X, covariates=[1.0])
+    row_cor = hl.row_correlation(mt.X)
+    rce = row_cor.to_table_row_major()
+    mt = mt.annotate_rows(row_cor=rce[mt.row_idx].entries, pval=pval_ht[mt.row_key].p_value)
+    hl.gfisher(mt.gene, mt.pval, mt.df, mt.weight, mt.row_cor, mt.row_idx)
+    ```
+    """
+    mt = matrix_table_source("ogfisher", key)
+    use_genotype = genotype is not None
+    # FIXME: remove this logic when annotation is better optimized (taken from line 3050 of skat function)
+    # used to name group column in the output table to what it was in the input. Logic taken from line 3050 of skat function
+    key_name_out = mt._fields_inverse[key] if key in mt._fields_inverse else "id"
+    df = df.map(lambda x: hl.float64(x))
+    row_exprs = {'__key': key, '__pvalue': pval, '__weight': w, '__df': df}
+
+    if use_genotype:
+        raise_unless_entry_indexed('gfisher/genotype', genotype)
+        print("Using given genotype to calculate correlation")
+        # FIXME: remove this logic when annotation is better optimized
+        if genotype in mt._fields_inverse:
+            geno_field_name = mt._fields_inverse[genotype]
+            entry_expr = {}
+        else:
+            geno_field_name = Env.get_uid()
+            entry_expr = {geno_field_name: genotype}
+    else:
+        row_exprs['__corr'] = corr
+        row_exprs['__rowIdx'] = corr_idx
+        geno_field_name = "__genotype"
+        entry_expr = {}
+
+    mt = mt._select_all(row_exprs=row_exprs, entry_exprs=entry_expr)
+
+    if method not in ["HYB", "MR", "GB"]:
+        raise ValueError(f'gfisher: method must be one of "HYB", "MR", "GB". received value "{method}"')
+
+    config = {
+        'name': 'OGFisher',
+        'nTests': n_tests,
+        'keyField': '__key',
+        'keyFieldOut': key_name_out,
+        'pField': '__pvalue',
+        'dfField': '__df',
+        'weightField': '__weight',
+        'useGenotype': use_genotype,
+        'genoField': geno_field_name,
+        'corrField': '__corr',
+        'rowIDXField': '__rowIdx',
+        'method': method,
+        'oneSided': one_sided,
+    }
     return Table(ir.MatrixToTableApply(mt._mir, config)).persist()
 
 

@@ -1039,6 +1039,28 @@ class MatrixToTableApply(TableIR):
                 i=hl.tstr, j=hl.tstr, ibd=ibd_info_type, ibs0=hl.tint64, ibs1=hl.tint64, ibs2=hl.tint64
             )
             return hl.ttable(hl.tstruct(), ibd_type, ['i', 'j'])
+        elif name == "SimpleGroupSum":
+            key_field = self.config['keyField']
+            key_type = child_typ.row_type[key_field]
+            my_type = hl.dtype(f'struct{{id:{key_type},my_sum:float64}}')
+            return hl.ttable(hl.tstruct(), my_type, ['id'])
+        elif name == "GFisher":
+            key_field_out = self.config['keyFieldOut']
+            key_type = child_typ.row_type[self.config['keyField']]
+            my_type = hl.dtype(f'struct{{{key_field_out}:{key_type},n:int32,stat:float64,p_value:float64}}')
+            return hl.ttable(hl.tstruct(), my_type, [key_field_out])
+        elif name == "OGFisher":
+            key_field_out = self.config['keyFieldOut']
+            key_type = child_typ.row_type[self.config['keyField']]
+            my_type = hl.dtype(
+                f'struct{{{key_field_out}:{key_type},n:int32,stat_ind:array<float64>,p_value_ind:array<float64>,stat:float64,p_value:float64}}'
+            )
+            return hl.ttable(hl.tstruct(), my_type, [key_field_out])
+        elif name == "GLOW":
+            key_field_out = self.config['keyFieldOut']
+            key_type = child_typ.row_type[self.config['keyField']]
+            my_type = hl.dtype(f'struct{{{key_field_out}:{key_type},n:int32,stat:array<float64>,pval:array<float64>}}')
+            return hl.ttable(hl.tstruct(), my_type, [key_field_out])
         else:
             assert name == 'LocalLDPrune', name
             return hl.ttable(
