@@ -6,6 +6,14 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar and Peter Howell
 Last update (latest update first):
+  Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-06: K2 drops NaN terms, as SPAtest's K2 and
+    K2_fast do (na.rm = TRUE). Where exp(-g t) overflows a term is Inf/Inf = NaN with limit 0; the
+    sum turned NaN, the Newton step NaN, and SaddleProb fell back to the unadjusted p-value
+    ("Error_Converge"). On the smoke test this hit one rare variant (w025, 21-16816655-G-T): p
+    0.1090 unadjusted instead of SPAtest's 0.06996. Asserted by SPAGroupCSpec's K2 overflow test
+    against research/gfisher-spa-reference/fixtures/spa_k2_overflow_expected.csv. GLOWh
+    0project/ai-reports/2026-11-05-spa-error-converge-attribution.md.
+    Mirrors: SPAtest 3.1.2's K2 and K2_fast.
   Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-03: two lint fixes for Hail 0.2.138's
     warnings-as-errors build, no change to what is computed: the SPA test grid's Double range is
     now an integer range times 0.5 (same values), and two unused exception bindings are
@@ -236,8 +244,18 @@ object FuncCalcuZScores {
       val temp2 = (1.0 - mu_) * mu_ * pow(g_, 2) * exp(-g_ *:* t1)
 
       // The second derivative of the CGF:
-      // K2(t1) = sum( numerator / denominator )
-      out(i) = sum(temp2 / temp1) + naSigma
+      // K2(t1) = sum( numerator / denominator ), DROPPING NaN terms, as SPAtest's
+      // K2 and K2_fast do (sum(temp2/temp1, na.rm = TRUE)). A term is NaN when
+      // exp(-g * t1) overflows to Inf (|g * t1| > ~709.78): Inf / Inf. Its limit
+      // is 0 -- the numerator grows as e^x, the denominator as e^(2x) -- so
+      // dropping it is exact in the limit. Summing it instead made K2 NaN, the
+      // Newton step NaN, and getRootK1 report non-convergence on inputs SPAtest
+      // solves (a rare variant whose Newton step reached t ~ -1676; GLOWh
+      // 0project/ai-reports/2026-11-05-spa-error-converge-attribution.md).
+      val ratio = temp2 / temp1
+      var s = 0.0
+      for (k <- 0 until ratio.length) if (!ratio(k).isNaN) s += ratio(k)
+      out(i) = s + naSigma
     }
 
     out
