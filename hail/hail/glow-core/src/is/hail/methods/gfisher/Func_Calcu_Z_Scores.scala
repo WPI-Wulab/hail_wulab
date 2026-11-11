@@ -6,6 +6,15 @@ Reference: Zhang, Hong, and Zheyang Wu. "The generalized Fisher's combination an
            Liu, Ming. "Integrative Analysis of Large Genomic Data." WPI (2025).
 Creators: Kylie Hoar and Peter Howell
 Last update (latest update first):
+  Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-10: getZ_marg_score_binary_SPA signs each
+    SPA Z-score by the centred score G'(Y - Y0), as GLOWr does, not by Gscale'Y. The two differ by
+    Gscale'Y0, which is 0 when every covariate is categorical and not otherwise, so with a
+    continuous covariate a variant with a small score could get the wrong sign. The p-values were
+    unaffected (SaddleProb centres q itself); Burden and Omni entries using the signed Z were not.
+    Found by VALID-2 on ALS chr21 (13 covariates incl. age and PCs). Asserted by ZScoreGroupCSpec's
+    SPA black-box test on the binary_sign fixture case. GLOWh
+    0project/ai-reports/2026-11-10-spa-z-sign-defect.md. Mirrors: GLOWr 0.3.5's
+    getZ_marg_score_binary_SPA ("score = t(G) %*% (Y - Y0)", sign(score)).
   Claude Code (Opus 5.5), prompted by VPanwar, 2026-11-06: K2 drops NaN terms, as SPAtest's K2 and
     K2_fast do (na.rm = TRUE). Where exp(-g t) overflows a term is Inf/Inf = NaN with limit 0; the
     sum turned NaN, the Newton step NaN, and SaddleProb fell back to the unadjusted p-value
@@ -946,8 +955,14 @@ object FuncCalcuZScores {
         .asInstanceOf[Double]
     }.toArray)
 
-    // Transform SPA p-values into Z-scores
-    val Zscores_spa = BDV(pval_spa.map(p => Normal.quantile(p / 2.0, 0.0, 1.0, false, false)).toArray) *:* signum(score)
+    // Transform SPA p-values into Z-scores. The sign is that of the CENTRED score G'(Y - Y0), as in
+    // GLOWr ("score = t(G) %*% (Y - Y0)"; "qnorm(pval_spa/2, lower.tail = FALSE) * sign(score)").
+    // `score` above is Gscale'Y, which is what SaddleProb takes as q: SaddleProb compares q with its
+    // own mean Gscale'Y0, so the p-value is right. But Gscale'Y = G'(Y - Y0) + Gscale'Y0, and the
+    // offset Gscale'Y0 is non-zero once a covariate is continuous, so signum(score) could flip the
+    // sign of a variant with a small score (GLOWh 0project/ai-reports/2026-11-10-spa-z-sign-defect.md).
+    val scoreCentred = G.t * (Y - Y0)
+    val Zscores_spa = BDV(pval_spa.map(p => Normal.quantile(p / 2.0, 0.0, 1.0, false, false)).toArray) *:* signum(scoreCentred)
 
     // Perform a projection of genotype matrix for correlation estimation (GHG is the residualized, cross-product matrix)
     val sqrtY0 = sqrt(Y0_vec)
